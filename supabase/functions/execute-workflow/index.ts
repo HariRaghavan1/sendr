@@ -50,47 +50,60 @@ serve(async (req) => {
     const instructions = workflow.instructions || '';
 
     // Start log
-    await updateExecutionLog(supabase, execution_id, 'Test run started');
+    await updateExecutionLog(supabase, execution_id, '🚀 Test run started');
 
-    // Get user's Clado API key for prospect search
+    // Get user's API keys
+    await updateExecutionLog(supabase, execution_id, '🔑 Checking API configuration...');
+    
     const { data: settings } = await supabase
       .from('user_settings')
-      .select('clado_api_key')
+      .select('clado_api_key, openai_api_key')
       .eq('user_id', user.id)
       .single();
 
-    if (!settings?.clado_api_key) {
-      await failExecution(supabase, execution_id, 'Clado API key not configured. Please add it in Settings.');
+    if (!settings?.clado_api_key || !settings?.openai_api_key) {
+      const missing = [];
+      if (!settings?.clado_api_key) missing.push('Clado API key');
+      if (!settings?.openai_api_key) missing.push('OpenAI API key');
+      
+      const errorMsg = `Missing: ${missing.join(', ')}. Please configure in Settings.`;
+      await updateExecutionLog(supabase, execution_id, `❌ ${errorMsg}`);
+      await failExecution(supabase, execution_id, errorMsg);
+      
       return new Response(
-        JSON.stringify({ execution_id, message: 'Missing Clado API key' }),
+        JSON.stringify({ execution_id, message: errorMsg }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+    
+    await updateExecutionLog(supabase, execution_id, '✅ API keys validated');
 
     // Find prospects (limit to 5 for test runs)
-    await updateExecutionLog(supabase, execution_id, 'Finding prospects using Clado API...');
+    await updateExecutionLog(supabase, execution_id, '🔍 Searching for prospects via Clado API...');
+    console.log('Calling Clado with criteria:', targetCriteria);
     
-    const cladoResponse = await fetch('https://api.clado.ai/v1/search', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${settings.clado_api_key}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        criteria: targetCriteria,
-        limit: 5,
-      }),
-    });
-
     let prospects: any[] = [];
-    if (!cladoResponse.ok) {
-      const errorText = await cladoResponse.text();
-      await failExecution(supabase, execution_id, `Failed to find prospects: ${errorText}`);
-      return new Response(
-        JSON.stringify({ execution_id, message: 'Failed to find prospects' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    } else {
+    try {
+      const cladoResponse = await fetch('https://api.clado.ai/v1/search', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${settings.clado_api_key}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          criteria: targetCriteria,
+          limit: 5,
+        }),
+      });
+
+      console.log('Clado response status:', cladoResponse.status);
+
+      if (!cladoResponse.ok) {
+        const errorText = await cladoResponse.text();
+        console.error('Clado error response:', errorText);
+        throw new Error(`Clado API returned ${cladoResponse.status}: ${errorText}`);
+      }
+
       const cladoData = await cladoResponse.json();
       prospects = (cladoData.results || []).map((result: any) => ({
         id: crypto.randomUUID(),
@@ -100,10 +113,24 @@ serve(async (req) => {
         company: result.company || '',
         linkedin_url: result.linkedin_url || '',
       }));
+      
+      await updateExecutionLog(supabase, execution_id, `✅ Found ${prospects.length} prospects from Clado`);
+      console.log(`Retrieved ${prospects.length} prospects`);
+      
+    } catch (error: any) {
+      const errorMsg = `Clado API error: ${error.message}`;
+      console.error('Clado fetch failed:', error);
+      await updateExecutionLog(supabase, execution_id, `❌ ${errorMsg}`);
+      await failExecution(supabase, execution_id, errorMsg);
+      
+      return new Response(
+        JSON.stringify({ execution_id, message: errorMsg }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     if (prospects.length === 0) {
-      await updateExecutionLog(supabase, execution_id, 'No prospects found matching criteria');
+      await updateExecutionLog(supabase, execution_id, '⚠️ No prospects found matching criteria. Test complete.');
       await completeExecution(supabase, execution_id);
       return new Response(
         JSON.stringify({ execution_id, message: 'No prospects found', prospects_processed: 0 }),
@@ -117,7 +144,7 @@ serve(async (req) => {
       .update({ total_prospects: prospects.length, prospects_found: prospects.length })
       .eq('id', execution_id);
 
-    await updateExecutionLog(supabase, execution_id, `Found ${prospects.length} prospects`);
+    await updateExecutionLog(supabase, execution_id, `📧 Starting email generation for ${prospects.length} prospects...`);
 
     // Process each prospect
     let successCount = 0;
@@ -130,22 +157,10 @@ serve(async (req) => {
             await updateExecutionLog(
               supabase, 
               execution_id, 
-              `Processing prospect ${i + 1}/${prospects.length}: ${prospect.name || 'Unknown'}`
+              `🤖 Generating email ${i + 1}/${prospects.length} for ${prospect.name}...`
             );
-
-            // Generate email using workflow instructions
-            await updateExecutionLog(supabase, execution_id, `Generating email for ${prospect.name}...`);
             
-            // Get user's OpenAI API key
-            const { data: openaiSettings } = await supabase
-              .from('user_settings')
-              .select('openai_api_key')
-              .eq('user_id', user.id)
-              .single();
-
-            if (!openaiSettings?.openai_api_key) {
-              throw new Error('OpenAI API key not configured');
-            }
+            console.log(`Processing prospect ${i + 1}: ${prospect.name}`);
 
             // Build prompts
             const toneMap: Record<string, string> = {
@@ -168,10 +183,12 @@ serve(async (req) => {
             const userPrompt = `Write a cold email to ${prospect.name}, ${prospect.title || 'professional'} at ${prospect.company || 'their company'}.\n\n${instructions ? `Campaign instructions: ${instructions}` : ''}\n\nTarget criteria:\n${JSON.stringify(targetCriteria, null, 2)}\n\nWrite a compelling subject line and email body that opens a conversation.`;
 
             // Generate email using OpenAI
+            console.log(`Calling OpenAI for prospect ${i + 1}`);
+            
             const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
               method: 'POST',
               headers: {
-                'Authorization': `Bearer ${openaiSettings.openai_api_key}`,
+                'Authorization': `Bearer ${settings.openai_api_key}`,
                 'Content-Type': 'application/json',
               },
               body: JSON.stringify({
@@ -184,8 +201,11 @@ serve(async (req) => {
               }),
             });
 
+            console.log(`OpenAI response status for prospect ${i + 1}:`, openaiResponse.status);
+
             if (!openaiResponse.ok) {
               const errorText = await openaiResponse.text();
+              console.error(`OpenAI error for prospect ${i + 1}:`, errorText);
               throw new Error(`OpenAI API error: ${errorText}`);
             }
 
@@ -215,9 +235,10 @@ serve(async (req) => {
             await updateExecutionLog(
               supabase, 
               execution_id, 
-              `✓ Email generated for ${prospect.email}\nSubject: ${subject}\n(not sent - test run)`
+              `✅ Generated email ${i + 1}/${prospects.length}\n📧 To: ${prospect.email}\n📝 Subject: ${subject}\n(Test mode - not sent)`
             );
-
+            
+            console.log(`Successfully generated email for ${prospect.name}`);
             successCount++;
 
           } catch (error: any) {
@@ -225,7 +246,7 @@ serve(async (req) => {
             await updateExecutionLog(
               supabase, 
               execution_id, 
-              `✗ Failed to process ${prospect.name}: ${error.message}`
+              `❌ Failed for ${prospect.name}: ${error.message}`
             );
             failCount++;
           }
@@ -244,9 +265,10 @@ serve(async (req) => {
         await updateExecutionLog(
           supabase, 
           execution_id, 
-          `Test run completed: ${successCount} successful, ${failCount} failed`
+          `🎉 Test run complete!\n✅ ${successCount} emails generated\n❌ ${failCount} failed`
         );
         
+        console.log(`Test run finished: ${successCount} success, ${failCount} failed`);
         await completeExecution(supabase, execution_id);
 
         return new Response(
