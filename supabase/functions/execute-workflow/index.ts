@@ -510,7 +510,26 @@ serve(async (req) => {
     const config = workflow.workflow_config || {};
     const targetCriteria = config.target_criteria || {};
     const instructions = workflow.instructions || '';
-    const emailTemplate = config.email_template || null; // Custom template/example from user
+    
+    // CRITICAL: Check for template in multiple possible locations
+    // Sometimes it might be nested differently in the JSON
+    let emailTemplate = config.email_template || null;
+    
+    // DEBUG: Log the entire workflow config to see what we have
+    console.log('\n🔍 RAW WORKFLOW CONFIG:');
+    console.log(JSON.stringify(config, null, 2));
+    console.log(`\n🔍 EMAIL TEMPLATE EXTRACTION:`);
+    console.log(`   config.email_template: ${config.email_template ? 'EXISTS' : 'NULL'}`);
+    if (config.email_template) {
+      console.log(`   config.email_template keys: ${Object.keys(config.email_template).join(', ')}`);
+      console.log(`   config.email_template.type: ${config.email_template.type}`);
+      console.log(`   config.email_template.example_email: ${config.email_template.example_email ? 'EXISTS' : 'NULL'}`);
+      if (config.email_template.example_email) {
+        console.log(`   config.email_template.example_email.body: ${config.email_template.example_email.body ? `YES (${config.email_template.example_email.body.length} chars)` : 'NULL'}`);
+        console.log(`   config.email_template.example_email.body preview: "${config.email_template.example_email.body?.substring(0, 200) || 'N/A'}"`);
+      }
+    }
+    console.log(`   Final emailTemplate variable: ${emailTemplate ? 'EXISTS' : 'NULL'}`);
     
     console.log(`\n🔍 EXTRACTED VALUES:`);
     console.log(`   config exists: ${!!config}`);
@@ -594,8 +613,26 @@ serve(async (req) => {
     
     // CRITICAL: Store template check result at workflow level for later use
     // This ensures template detection happens once and is reused throughout
-    const workflowTemplateBody = emailTemplate?.example_email?.body;
-    const workflowHasTemplate = !!(workflowTemplateBody && workflowTemplateBody.trim().length > 0);
+    // MULTIPLE CHECKS to ensure we find the template
+    const workflowTemplateBody = emailTemplate?.example_email?.body || 
+                                 (emailTemplate?.example_email && typeof emailTemplate.example_email === 'object' && 'body' in emailTemplate.example_email ? emailTemplate.example_email.body : null);
+    const workflowTemplateBodyTrimmed = workflowTemplateBody?.trim() || '';
+    const workflowHasTemplate = workflowTemplateBodyTrimmed.length > 0;
+    
+    // CRITICAL DEBUG: Log to execution log so user can see
+    await updateExecutionLog(supabase, execution_id, `🔍 TEMPLATE DETECTION DEBUG:`);
+    await updateExecutionLog(supabase, execution_id, `   emailTemplate exists: ${!!emailTemplate}`);
+    if (emailTemplate) {
+      await updateExecutionLog(supabase, execution_id, `   emailTemplate.type: ${emailTemplate.type || 'MISSING'}`);
+      await updateExecutionLog(supabase, execution_id, `   emailTemplate.example_email exists: ${!!emailTemplate.example_email}`);
+      if (emailTemplate.example_email) {
+        await updateExecutionLog(supabase, execution_id, `   emailTemplate.example_email.body exists: ${!!emailTemplate.example_email.body}`);
+        await updateExecutionLog(supabase, execution_id, `   emailTemplate.example_email.body length: ${emailTemplate.example_email.body?.length || 0}`);
+        await updateExecutionLog(supabase, execution_id, `   emailTemplate.example_email.body preview: "${(emailTemplate.example_email.body || '').substring(0, 100)}..."`);
+      }
+    }
+    await updateExecutionLog(supabase, execution_id, `   workflowTemplateBody: ${workflowTemplateBody ? `YES (${workflowTemplateBody.length} chars)` : 'NULL'}`);
+    await updateExecutionLog(supabase, execution_id, `   workflowHasTemplate: ${workflowHasTemplate}`);
     
     // Log template status IMMEDIATELY so user can see it early
     if (workflowHasTemplate) {
@@ -1106,17 +1143,36 @@ serve(async (req) => {
     const templateCheckBody = workflowTemplateBody; // Use the one we checked earlier
     const templateExists = workflowHasTemplate; // Use the flag we set earlier
     
-    if (templateExists) {
+    // CRITICAL DEBUG: Log what we actually have
+    console.log('\n🔍 WORKFLOW-LEVEL TEMPLATE CHECK:');
+    console.log(`   workflowTemplateBody: ${workflowTemplateBody ? `YES (${workflowTemplateBody.length} chars)` : 'NULL'}`);
+    console.log(`   workflowHasTemplate: ${workflowHasTemplate}`);
+    console.log(`   emailTemplate: ${emailTemplate ? 'EXISTS' : 'NULL'}`);
+    if (emailTemplate) {
+      console.log(`   emailTemplate.type: ${emailTemplate.type}`);
+      console.log(`   emailTemplate.example_email: ${emailTemplate.example_email ? 'EXISTS' : 'NULL'}`);
+      if (emailTemplate.example_email) {
+        console.log(`   emailTemplate.example_email.body: ${emailTemplate.example_email.body ? `YES (${emailTemplate.example_email.body.length} chars)` : 'NULL'}`);
+        console.log(`   emailTemplate.example_email.body trimmed: ${emailTemplate.example_email.body?.trim() ? `YES (${emailTemplate.example_email.body.trim().length} chars)` : 'EMPTY'}`);
+      }
+    }
+    console.log(`   templateCheckBody: ${templateCheckBody ? `YES (${templateCheckBody.length} chars)` : 'NULL'}`);
+    console.log(`   templateExists: ${templateExists}`);
+    
+    if (templateExists && templateCheckBody) {
       await updateExecutionLog(supabase, execution_id, `[3/3] ✅✅✅ TEMPLATE MODE: Template found! Will use template for ALL ${prospects.length} prospects (AI generation will be SKIPPED)`);
       await updateExecutionLog(supabase, execution_id, `[3/3] 📧 Template preview: "${templateCheckBody.substring(0, 100)}..."`);
     } else {
       await updateExecutionLog(supabase, execution_id, `[3/3] ❌❌❌ AI MODE: NO TEMPLATE FOUND - Will use AI generation for ${prospects.length} prospects`);
+      await updateExecutionLog(supabase, execution_id, `[3/3] 🔍 DEBUG: workflowTemplateBody=${!!workflowTemplateBody}, workflowHasTemplate=${workflowHasTemplate}, emailTemplate=${!!emailTemplate}`);
       if (!emailTemplate) {
         await updateExecutionLog(supabase, execution_id, `[3/3] ⚠️ Reason: emailTemplate is NULL - no template in workflow_config`);
       } else if (!emailTemplate.example_email) {
         await updateExecutionLog(supabase, execution_id, `[3/3] ⚠️ Reason: emailTemplate.example_email is missing`);
       } else if (!emailTemplate.example_email.body) {
         await updateExecutionLog(supabase, execution_id, `[3/3] ⚠️ Reason: emailTemplate.example_email.body is missing or empty`);
+      } else {
+        await updateExecutionLog(supabase, execution_id, `[3/3] ⚠️ Reason: Template body exists but workflowHasTemplate=false. Body length: ${emailTemplate.example_email.body?.length || 0}`);
       }
     }
 
@@ -1157,14 +1213,12 @@ serve(async (req) => {
         const templateFromCheckBody = templateCheckBody?.trim();
         const templateBody = templateFromEmailTemplate || templateFromCheckBody || null;
         
-        // DEBUG: Log what we found
-        console.log(`\n🔍 TEMPLATE CHECK FOR ${prospect.name}:`);
-        console.log(`   emailTemplate exists: ${!!emailTemplate}`);
-        console.log(`   emailTemplate.example_email exists: ${!!emailTemplate?.example_email}`);
-        console.log(`   emailTemplate.example_email.body exists: ${!!emailTemplate?.example_email?.body}`);
-        console.log(`   templateFromEmailTemplate: ${templateFromEmailTemplate ? `YES (${templateFromEmailTemplate.length} chars)` : 'NO'}`);
-        console.log(`   templateCheckBody: ${templateCheckBody ? `YES (${templateCheckBody.length} chars)` : 'NO'}`);
-        console.log(`   templateBody (final): ${templateBody ? `YES (${templateBody.length} chars)` : 'NO'}`);
+        // CRITICAL: Log to execution log so user can see what's happening
+        await updateExecutionLog(supabase, execution_id, `🔍 TEMPLATE CHECK FOR ${prospect.name}:`);
+        await updateExecutionLog(supabase, execution_id, `   emailTemplate exists: ${!!emailTemplate}`);
+        await updateExecutionLog(supabase, execution_id, `   emailTemplate.example_email.body: ${templateFromEmailTemplate ? `YES (${templateFromEmailTemplate.length} chars)` : 'NO'}`);
+        await updateExecutionLog(supabase, execution_id, `   templateCheckBody: ${templateFromCheckBody ? `YES (${templateFromCheckBody.length} chars)` : 'NO'}`);
+        await updateExecutionLog(supabase, execution_id, `   templateBody (final): ${templateBody ? `YES (${templateBody.length} chars)` : 'NO'}`);
         
         if (templateBody) {
           // Use template - simple and direct
@@ -1173,11 +1227,11 @@ serve(async (req) => {
             ? replacePlaceholders(emailTemplate.example_email.subject, prospect, senderName)
             : 'Quick question';
           
-          console.log(`   ✅ USING TEMPLATE - parsedBody set to template (${parsedBody.length} chars)`);
-          await updateExecutionLog(supabase, execution_id, `[3/3] 📧 Using template for ${prospect.name} (${templateBody.length} chars)...`);
+          await updateExecutionLog(supabase, execution_id, `✅✅✅ USING TEMPLATE for ${prospect.name} - parsedBody set (${parsedBody.length} chars)`);
+          await updateExecutionLog(supabase, execution_id, `📧 Template preview: "${parsedBody.substring(0, 150)}..."`);
         } else {
-          console.log(`   ❌ NO TEMPLATE - will use AI generation`);
           // No template - generate with AI
+          await updateExecutionLog(supabase, execution_id, `❌❌❌ NO TEMPLATE for ${prospect.name} - using AI generation`);
           await updateExecutionLog(supabase, execution_id, `[3/3] 🤖 Gemini: Generating email ${i + 1}/${prospects.length} for ${prospect.name}...`);
           
           // Build tone and goal instructions
