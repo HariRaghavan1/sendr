@@ -63,9 +63,12 @@ serve(async (req) => {
       const hasExistingSignature = signatureAlreadyPresentPattern.test(text.trim());
       
       // Replace common placeholders
+      // IMPORTANT: {Name} and [Name] should be replaced with "Mr./Ms. LastName" for proper addressing
       let replaced = text
         .replace(/\{first_name\}/gi, firstName)
         .replace(/\{firstname\}/gi, firstName)
+        .replace(/\{Name\}/g, `${titlePrefix} ${lastName}`) // {Name} → "Mr. Smith" or "Ms. Johnson"
+        .replace(/\[Name\]/g, `${titlePrefix} ${lastName}`) // [Name] → "Mr. Smith" or "Ms. Johnson"
         .replace(/\{name\}/gi, fullName)
         .replace(/\{full_name\}/gi, fullName)
         .replace(/\{last_name\}/gi, lastName)
@@ -142,18 +145,52 @@ serve(async (req) => {
       }
       
       // Final cleanup: Remove any remaining duplicate signatures
-      const endDuplicatePattern = new RegExp(`(${signatureName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})(?:[\\s\\n]+\\1)+\\s*$`, 'gi');
-      replaced = replaced.replace(endDuplicatePattern, signatureName);
-      
-      const closingDuplicatePattern = new RegExp(`(Best|Regards|Thanks|Thank you|Sincerely)[,\\s]*${signatureName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s]+${signatureName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'gi');
+      // Pattern 1: "Best, Hari Best, Hari" or "Best Hari Best Hari"
+      const closingDuplicatePattern = new RegExp(
+        `(Best|Regards|Thanks|Thank you|Sincerely)[,\\s]*${signatureName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\n]*(Best|Regards|Thanks|Thank you|Sincerely)[,\\s]*${signatureName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`,
+        'gi'
+      );
       replaced = replaced.replace(closingDuplicatePattern, (match) => {
         const closing = match.match(/(Best|Regards|Thanks|Thank you|Sincerely)/i)?.[0] || 'Best';
         return `${closing},\n${signatureName}`;
       });
       
-      // Clean up extra spaces and newlines
+      // Pattern 2: Multiple instances at the end (e.g., "Best,\nHari\nHari" or "Best Hari Hari")
+      const endDuplicatePattern = new RegExp(`(${signatureName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})(?:[\\s\\n]+\\1)+\\s*$`, 'gi');
+      replaced = replaced.replace(endDuplicatePattern, signatureName);
+      
+      // Pattern 3: "Best, Hari Hari" (same closing with duplicate name)
+      const sameClosingDuplicatePattern = new RegExp(
+        `(Best|Regards|Thanks|Thank you|Sincerely)[,\\s]*${signatureName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\n]+${signatureName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`,
+        'gi'
+      );
+      replaced = replaced.replace(sameClosingDuplicatePattern, (match) => {
+        const closing = match.match(/(Best|Regards|Thanks|Thank you|Sincerely)/i)?.[0] || 'Best';
+        return `${closing},\n${signatureName}`;
+      });
+      
+      // Final aggressive cleanup: Remove any remaining duplicate signature patterns
+      // This catches cases like "Best, Hari Best, Hari" that might have slipped through
+      const finalAggressivePattern = new RegExp(
+        `((Best|Regards|Thanks|Thank you|Sincerely)[,\\s]*\\s*${signatureName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\n]*)+`,
+        'gi'
+      );
+      const finalMatches = replaced.match(finalAggressivePattern);
+      if (finalMatches && finalMatches.length > 0) {
+        // Find the last occurrence of closing + signature
+        const lastOccurrence = finalMatches[finalMatches.length - 1];
+        const lastIndex = replaced.toLowerCase().lastIndexOf(lastOccurrence.toLowerCase());
+        if (lastIndex !== -1) {
+          // Remove everything after the last occurrence, then add proper closing + signature
+          const beforeLast = replaced.substring(0, lastIndex).trim();
+          const closing = lastOccurrence.match(/(Best|Regards|Thanks|Thank you|Sincerely)/i)?.[0] || 'Best';
+          replaced = beforeLast + '\n\n' + closing + ',\n' + signatureName;
+        }
+      }
+      
+      // Clean up extra spaces and newlines (but preserve intentional line breaks)
       replaced = replaced.replace(/\n{3,}/g, '\n\n'); // Max 2 consecutive newlines
-      replaced = replaced.replace(/\s{3,}/g, ' '); // Max 2 consecutive spaces
+      replaced = replaced.replace(/[ \t]{3,}/g, ' '); // Max 2 consecutive spaces/tabs (but keep newlines)
       
       return replaced.trim();
     }
@@ -370,19 +407,33 @@ serve(async (req) => {
       }
       
       // Fallback: find most recent workflow for this user
+      // CRITICAL: Prefer workflows that have templates
       if (!workflow_id) {
         console.log('No workflow found from conversation/execution/campaign, finding most recent...');
-        const { data: recentWorkflow } = await supabase
+        
+        // First, try to find a workflow with a template (check recent workflows)
+        const { data: recentWorkflows } = await supabase
           .from('workflows')
-          .select('id, name')
+          .select('id, name, workflow_config')
           .eq('user_id', user.id)
           .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+          .limit(10);
         
-        if (recentWorkflow) {
+        // Check if any recent workflow has a template
+        const workflowWithTemplate = recentWorkflows?.find(w => 
+          w.workflow_config?.email_template?.example_email?.body
+        );
+        
+        if (workflowWithTemplate) {
+          workflow_id = workflowWithTemplate.id;
+          console.log(`✅ Found workflow with template: ${workflowWithTemplate.name} (${workflow_id})`);
+          await updateExecutionLog(supabase, execution_id, `✅ Using workflow with template: ${workflowWithTemplate.name}`);
+        } else if (recentWorkflows && recentWorkflows.length > 0) {
+          // Fallback to most recent workflow
+          const recentWorkflow = recentWorkflows[0];
           workflow_id = recentWorkflow.id;
           console.log(`Using most recent workflow: ${recentWorkflow.name} (${workflow_id})`);
+          await updateExecutionLog(supabase, execution_id, `Using most recent workflow: ${recentWorkflow.name} (no template found)`);
         }
       }
       
@@ -435,20 +486,136 @@ serve(async (req) => {
       .single();
 
     if (workflowError || !workflow) {
+      await updateExecutionLog(supabase, execution_id, `❌ ERROR: Workflow not found (${workflow_id})`);
       return new Response(
         JSON.stringify({ execution_id, message: 'Workflow not found' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
+    // CRITICAL DEBUGGING - Log to execution log so user can see it
+    await updateExecutionLog(supabase, execution_id, `🔍 Loading workflow: ${workflow.name || workflow_id}`);
+    
+    console.log('\n🔍 WORKFLOW LOADED:');
+    console.log(`   Workflow ID: ${workflow_id}`);
+    console.log(`   Workflow name: ${workflow.name || 'N/A'}`);
+    console.log(`   Workflow config type: ${typeof workflow.workflow_config}`);
+    console.log(`   Workflow config keys: ${workflow.workflow_config ? Object.keys(workflow.workflow_config).join(', ') : 'NONE'}`);
+    console.log(`   Full workflow_config:`, JSON.stringify(workflow.workflow_config, null, 2));
+    
+    // Log to execution log so user can see in UI
+    const configKeys = workflow.workflow_config ? Object.keys(workflow.workflow_config).join(', ') : 'NONE';
+    await updateExecutionLog(supabase, execution_id, `🔍 Workflow config keys: ${configKeys}`);
+
     const config = workflow.workflow_config || {};
     const targetCriteria = config.target_criteria || {};
     const instructions = workflow.instructions || '';
     const emailTemplate = config.email_template || null; // Custom template/example from user
     
-    console.log('Workflow config:', JSON.stringify(config));
-    console.log('Target criteria:', JSON.stringify(targetCriteria));
-    console.log('Email template:', emailTemplate ? `${emailTemplate.type} template` : 'default template');
+    console.log(`\n🔍 EXTRACTED VALUES:`);
+    console.log(`   config exists: ${!!config}`);
+    console.log(`   config.email_template exists: ${!!config.email_template}`);
+    console.log(`   emailTemplate variable: ${emailTemplate ? 'EXISTS' : 'NULL'}`);
+    if (emailTemplate) {
+      console.log(`   emailTemplate type: ${emailTemplate.type}`);
+      console.log(`   emailTemplate keys: ${Object.keys(emailTemplate).join(', ')}`);
+    }
+    
+    // Log to execution log so user can see
+    await updateExecutionLog(supabase, execution_id, `🔍 Template check: ${emailTemplate ? 'FOUND' : 'NOT FOUND'}`);
+    if (emailTemplate) {
+      await updateExecutionLog(supabase, execution_id, `🔍 Template type: ${emailTemplate.type}, has body: ${!!emailTemplate.example_email?.body}`);
+    } else {
+      await updateExecutionLog(supabase, execution_id, `⚠️ NO TEMPLATE IN WORKFLOW - will use AI generation`);
+    }
+    
+    console.log('\n═══════════════════════════════════════════════════════════');
+    console.log('🚀 WORKFLOW EXECUTION STARTED');
+    console.log('═══════════════════════════════════════════════════════════\n');
+    
+    console.log('📋 Workflow config:', JSON.stringify(config));
+    console.log('🎯 Target criteria:', JSON.stringify(targetCriteria));
+    
+    // CRITICAL: Validate template is properly configured
+    const hasValidTemplate = emailTemplate && 
+                             emailTemplate.type === 'example' && 
+                             emailTemplate.example_email && 
+                             emailTemplate.example_email.body &&
+                             emailTemplate.example_email.body.trim() !== '';
+    
+    // EXTENSIVE TEMPLATE DEBUGGING
+    console.log('\n🔍 TEMPLATE STATUS CHECK:');
+    console.log('─────────────────────────────────────────────────────────');
+    console.log(`  ✅ emailTemplate exists: ${!!emailTemplate}`);
+    if (emailTemplate) {
+      console.log(`  ✅ emailTemplate.type: ${emailTemplate.type}`);
+      console.log(`  ✅ emailTemplate.example_email exists: ${!!emailTemplate.example_email}`);
+      console.log(`  ✅ emailTemplate.example_email.body exists: ${!!emailTemplate.example_email?.body}`);
+      console.log(`  ✅ emailTemplate.example_email.body length: ${emailTemplate.example_email?.body?.length || 0}`);
+      console.log(`  ✅ emailTemplate.example_email.body trimmed length: ${emailTemplate.example_email?.body?.trim().length || 0}`);
+      console.log(`  ✅ hasValidTemplate: ${hasValidTemplate}`);
+      console.log(`  📧 Template preview (first 200 chars):`);
+      console.log(`     "${emailTemplate.example_email?.body?.substring(0, 200) || 'N/A'}..."`);
+      console.log(`  📝 Template instructions: ${emailTemplate.instructions || 'none'}`);
+      console.log(`  📌 Template structure exists: ${!!emailTemplate.template_structure}`);
+    } else {
+      console.log(`  ❌ NO TEMPLATE PROVIDED - will use AI generation`);
+    }
+    console.log('─────────────────────────────────────────────────────────\n');
+    
+    if (emailTemplate) {
+      if (!hasValidTemplate) {
+        console.error('⚠️⚠️⚠️ TEMPLATE EXISTS BUT IS INVALID ⚠️⚠️⚠️');
+        console.error('   Reason: Template missing required fields (type, example_email, or body)');
+        console.error('   Action: Will use AI generation instead\n');
+        await updateExecutionLog(
+          supabase,
+          execution_id,
+          `⚠️ Template found but invalid - missing required fields. Using AI generation.`
+        );
+      } else {
+        console.log('✅✅✅ VALID TEMPLATE FOUND ✅✅✅');
+        console.log('   Template will be used for ALL prospects (including fallback contacts)');
+        console.log('   AI generation will be SKIPPED - template will be used directly\n');
+        await updateExecutionLog(
+          supabase,
+          execution_id,
+          `✅✅✅ TEMPLATE MODE: Custom template found and validated. Template will be used for ALL emails (AI generation skipped).`
+        );
+      }
+    } else {
+      console.log('ℹ️  No custom template - will use AI generation with default template structure\n');
+      await updateExecutionLog(
+        supabase,
+        execution_id,
+        `ℹ️ AI MODE: No custom template found in workflow. Using AI generation with default template.`
+      );
+    }
+    
+    // CRITICAL: Store template check result at workflow level for later use
+    // This ensures template detection happens once and is reused throughout
+    const workflowTemplateBody = emailTemplate?.example_email?.body;
+    const workflowHasTemplate = !!(workflowTemplateBody && workflowTemplateBody.trim().length > 0);
+    
+    // Log template status IMMEDIATELY so user can see it early
+    if (workflowHasTemplate) {
+      await updateExecutionLog(
+        supabase,
+        execution_id,
+        `✅✅✅ WORKFLOW TEMPLATE DETECTED: Template will be used for ALL email generation (AI will be SKIPPED)`
+      );
+      await updateExecutionLog(
+        supabase,
+        execution_id,
+        `📧 Template preview: "${workflowTemplateBody.substring(0, 150)}..."`
+      );
+    } else {
+      await updateExecutionLog(
+        supabase,
+        execution_id,
+        `❌❌❌ NO TEMPLATE IN WORKFLOW: Will use AI generation for all emails`
+      );
+    }
     
     // If no criteria, create a default search with specific job titles
     if (!targetCriteria || Object.keys(targetCriteria).length === 0 || !targetCriteria.job_titles || targetCriteria.job_titles.length === 0) {
@@ -598,24 +765,37 @@ serve(async (req) => {
     let prospects: any[] = [];
 
     try {
-      // Build search query from target criteria
-      const buildQuery = (criteria: any): string => {
+      // Build search query from target criteria with fallback strategies
+      const buildQuery = (criteria: any, fallbackLevel: number = 0): string => {
         const queryParts: string[] = [];
         
-        if (criteria.job_titles && Array.isArray(criteria.job_titles) && criteria.job_titles.length > 0) {
-          queryParts.push(criteria.job_titles.join(' or '));
-        }
+        // Fallback levels:
+        // 0: Full criteria (most specific)
+        // 1: Job titles only (broader)
+        // 2: Just job titles without location/company (broadest)
         
-        if (criteria.industry) {
-          queryParts.push(`in ${criteria.industry} industry`);
-        }
-        
-        if (criteria.location) {
-          queryParts.push(`located in ${criteria.location}`);
-        }
-        
-        if (criteria.company_size) {
-          queryParts.push(`at companies with ${criteria.company_size}`);
+        if (fallbackLevel === 0) {
+          // Original query with all criteria
+          if (criteria.job_titles && Array.isArray(criteria.job_titles) && criteria.job_titles.length > 0) {
+            queryParts.push(criteria.job_titles.join(' or '));
+          }
+          
+          if (criteria.industry) {
+            queryParts.push(`in ${criteria.industry} industry`);
+          }
+          
+          if (criteria.location) {
+            queryParts.push(`located in ${criteria.location}`);
+          }
+          
+          if (criteria.company_size) {
+            queryParts.push(`at companies with ${criteria.company_size}`);
+          }
+        } else if (fallbackLevel === 1) {
+          // Fallback: Just job titles
+          if (criteria.job_titles && Array.isArray(criteria.job_titles) && criteria.job_titles.length > 0) {
+            queryParts.push(criteria.job_titles.join(' or '));
+          }
         }
         
         return queryParts.join(' ') || 'professionals';
@@ -662,15 +842,33 @@ serve(async (req) => {
       );
 
       const searchPromises = queryStrategies.map(strategy => {
-        return strategy.criteria && Object.keys(strategy.criteria).length > 0
+        // Validate criteria - must have at least job_titles to be useful
+        const hasValidCriteria = strategy.criteria && 
+                                 strategy.criteria.job_titles && 
+                                 Array.isArray(strategy.criteria.job_titles) &&
+                                 strategy.criteria.job_titles.length > 0 &&
+                                 strategy.criteria.job_titles.some((title: string) => title && title.trim().length > 0);
+        
+        return hasValidCriteria
           ? (async () => {
               try {
-                const query = buildQuery(strategy.criteria);
+                // Clean and validate criteria before searching
+                const cleanCriteria = {
+                  job_titles: strategy.criteria.job_titles
+                    .filter((title: string) => title && title.trim().length > 0)
+                    .map((title: string) => title.trim()),
+                  ...(strategy.criteria.industry && strategy.criteria.industry.trim() ? { industry: strategy.criteria.industry.trim() } : {}),
+                  ...(strategy.criteria.location && strategy.criteria.location.trim() ? { location: strategy.criteria.location.trim() } : {}),
+                  ...(strategy.criteria.company_size ? { company_size: strategy.criteria.company_size } : {}),
+                };
+                
+                const query = buildQuery(cleanCriteria);
                 console.log(`🔍 Query "${strategy.description}": ${query}`);
+                console.log(`🔍 Criteria for "${strategy.description}":`, JSON.stringify(cleanCriteria));
                 const startTime = Date.now();
                 
                 const results = await searchCladoProspects(
-                  strategy.criteria,
+                  cleanCriteria,
                   cladoApiKey,
                   {
                     limit: Math.ceil(limit * 1.5), // Get more than needed for deduplication
@@ -715,7 +913,15 @@ serve(async (req) => {
 
       const results = await Promise.allSettled(searchPromises);
       
-      // Merge and deduplicate results
+      // Check if any searches succeeded
+      const successfulSearches = results.filter(r => r.status === 'fulfilled');
+      const failedSearches = results.filter(r => r.status === 'rejected');
+      
+      if (failedSearches.length > 0) {
+        console.log(`⚠️ ${failedSearches.length} search strategy(ies) failed, ${successfulSearches.length} succeeded`);
+      }
+      
+      // Merge and deduplicate results from successful searches
       const allProspects: any[] = [];
       const seen = new Set<string>();
 
@@ -735,6 +941,43 @@ serve(async (req) => {
       prospects = Array.isArray(allProspects) ? allProspects.slice(0, limit) : []; // Limit based on max_prospects parameter
       
       const searchDuration = ((Date.now() - searchStartTime) / 1000).toFixed(1);
+      
+      // If ALL searches failed, try a fallback broad search
+      if (prospects.length === 0 && successfulSearches.length === 0 && targetCriteria.job_titles && targetCriteria.job_titles.length > 0) {
+        await updateExecutionLog(
+          supabase, 
+          execution_id, 
+          `[2/3] ⚠️ All searches failed, trying fallback broad search...`
+        );
+        
+        try {
+          // Fallback: Very broad search with just job titles
+          const fallbackCriteria = { job_titles: targetCriteria.job_titles };
+          const fallbackResults = await searchCladoProspects(
+            fallbackCriteria,
+            cladoApiKey,
+            {
+              limit: limit * 2, // Get more for fallback
+              advanced_filtering: false, // Disable advanced filtering for broader results
+              initiateDeepResearch: true,
+              enrichContacts: shouldEnrichEmails,
+              enrichProfiles: true,
+              useScrapeForProfiles: false,
+            }
+          );
+          
+          if (fallbackResults.length > 0) {
+            prospects = fallbackResults.slice(0, limit);
+            await updateExecutionLog(
+              supabase, 
+              execution_id, 
+              `[2/3] ✅ Fallback search: ${prospects.length} prospects found`
+            );
+          }
+        } catch (fallbackError: any) {
+          console.error('Fallback search also failed:', fallbackError);
+        }
+      }
       
       if (prospects.length > 0) {
         await updateExecutionLog(
@@ -760,11 +1003,59 @@ serve(async (req) => {
           }));
         });
       } else {
-        await updateExecutionLog(
-          supabase, 
-          execution_id, 
-          `[2/3] ⚠️ Clado: No prospects found matching criteria. Try broadening your search.`
-        );
+        // Final fallback: Try an even broader search if we have job titles
+        if (targetCriteria.job_titles && targetCriteria.job_titles.length > 0) {
+          await updateExecutionLog(
+            supabase, 
+            execution_id, 
+            `[2/3] ⚠️ No prospects found, trying ultra-broad fallback search...`
+          );
+          
+          try {
+            // Ultra-broad: Just the first job title, no other filters
+            const ultraBroadCriteria = { job_titles: [targetCriteria.job_titles[0]] };
+            const ultraBroadResults = await searchCladoProspects(
+              ultraBroadCriteria,
+              cladoApiKey,
+              {
+                limit: limit * 3,
+                advanced_filtering: false,
+                initiateDeepResearch: true,
+                enrichContacts: shouldEnrichEmails,
+                enrichProfiles: false, // Skip profile enrichment for speed
+                useScrapeForProfiles: false,
+              }
+            );
+            
+            if (ultraBroadResults.length > 0) {
+              prospects = ultraBroadResults.slice(0, limit);
+              await updateExecutionLog(
+                supabase, 
+                execution_id, 
+                `[2/3] ✅ Ultra-broad fallback: ${prospects.length} prospects found`
+              );
+            } else {
+              await updateExecutionLog(
+                supabase, 
+                execution_id, 
+                `[2/3] ⚠️ Clado: No prospects found even with ultra-broad search. Please try:\n1. Broader job titles\n2. Remove location/industry filters\n3. Check your Clado API credits`
+              );
+            }
+          } catch (ultraBroadError: any) {
+            console.error('Ultra-broad fallback failed:', ultraBroadError);
+            await updateExecutionLog(
+              supabase, 
+              execution_id, 
+              `[2/3] ⚠️ Clado: No prospects found matching criteria. Try broadening your search or check API credits.`
+            );
+          }
+        } else {
+          await updateExecutionLog(
+            supabase, 
+            execution_id, 
+            `[2/3] ⚠️ Clado: No prospects found matching criteria. Try broadening your search.`
+          );
+        }
       }
 
       // Log enrichment summary
@@ -810,7 +1101,26 @@ serve(async (req) => {
       );
     }
 
-    await updateExecutionLog(supabase, execution_id, `[3/3] 📧 Gemini: Generating emails for ${prospects.length} prospects...`);
+    // CRITICAL: Use the workflow-level template check from above
+    // This ensures we use the same template detection logic
+    const templateCheckBody = workflowTemplateBody; // Use the one we checked earlier
+    const templateExists = workflowHasTemplate; // Use the flag we set earlier
+    
+    if (templateExists) {
+      await updateExecutionLog(supabase, execution_id, `[3/3] ✅✅✅ TEMPLATE MODE: Template found! Will use template for ALL ${prospects.length} prospects (AI generation will be SKIPPED)`);
+      await updateExecutionLog(supabase, execution_id, `[3/3] 📧 Template preview: "${templateCheckBody.substring(0, 100)}..."`);
+    } else {
+      await updateExecutionLog(supabase, execution_id, `[3/3] ❌❌❌ AI MODE: NO TEMPLATE FOUND - Will use AI generation for ${prospects.length} prospects`);
+      if (!emailTemplate) {
+        await updateExecutionLog(supabase, execution_id, `[3/3] ⚠️ Reason: emailTemplate is NULL - no template in workflow_config`);
+      } else if (!emailTemplate.example_email) {
+        await updateExecutionLog(supabase, execution_id, `[3/3] ⚠️ Reason: emailTemplate.example_email is missing`);
+      } else if (!emailTemplate.example_email.body) {
+        await updateExecutionLog(supabase, execution_id, `[3/3] ⚠️ Reason: emailTemplate.example_email.body is missing or empty`);
+      }
+    }
+
+    await updateExecutionLog(supabase, execution_id, `[3/3] 📧 Starting email generation for ${prospects.length} prospects...`);
 
     // Generate emails for each prospect
     const generatedEmails: any[] = [];
@@ -836,221 +1146,111 @@ serve(async (req) => {
       const prospect = prospects[i];
       
       try {
-        await updateExecutionLog(supabase, execution_id, `[3/3] 🤖 Gemini: Generating email ${i + 1}/${prospects.length} for ${prospect.name}...`);
-
-        // Build tone and goal instructions
-        const toneMap: Record<string, string> = {
-          professional: 'professional and polished',
-          casual: 'conversational and friendly',
-          friendly: 'warm and approachable',
-        };
-        const toneInstruction = toneMap[config.tone] || 'conversational';
-
-        const goalMap: Record<string, string> = {
-          meeting: 'schedule a meeting',
-          demo: 'book a demo',
-          call: 'schedule a call',
-          information: 'gather information',
-          partnership: 'explore a potential partnership',
-          other: 'start a conversation',
-        };
-        const goalInstruction = goalMap[config.goal] || 'start a conversation';
-
-        // Build conversation context summary
-        let contextSummary = '';
-        // Ensure conversationContext is an array (defensive check)
-        const safeConversationContext = Array.isArray(conversationContext) ? conversationContext : [];
-        if (safeConversationContext.length > 0) {
-          const relevantMessages = safeConversationContext
-            .filter((msg: any) => msg && msg.role && (msg.role === 'user' || (msg.role === 'assistant' && msg.content && msg.content.length < 500)))
-            .slice(-10);
-          if (relevantMessages.length > 0) {
-            contextSummary = `\n\nCAMPAIGN CONTEXT FROM CONVERSATION:\n${relevantMessages.map((m: any) => `${m.role}: ${m.content}`).join('\n')}\n`;
-          }
-        }
-
-        // Build custom template instructions if provided
-        let customTemplateSection = '';
-        if (emailTemplate) {
-          if (emailTemplate.type === 'example' && emailTemplate.example_email) {
-            customTemplateSection = `
-
-CRITICAL: USER HAS PROVIDED A CUSTOM EXAMPLE EMAIL TEMPLATE. YOU MUST FOLLOW THIS EXACT STRUCTURE AND STYLE.
-
-EXAMPLE EMAIL TEMPLATE:
-Subject: ${emailTemplate.example_email.subject || 'Example subject'}
-
-Body:
-${emailTemplate.example_email.body || ''}
-
-${emailTemplate.instructions ? `ADDITIONAL TEMPLATE INSTRUCTIONS:\n${emailTemplate.instructions}\n` : ''}
-
-REQUIREMENTS FOR USING THIS TEMPLATE:
-1. Follow the EXACT structure and style of the example email above
-2. Use the same greeting format, tone, and closing style
-3. Maintain the same paragraph structure and flow
-4. Keep the same level of formality and word count
-5. Use {first_name}, {company}, {title} placeholders where the example uses them
-6. Personalize the content based on the prospect's profile data
-7. DO NOT deviate from this template structure - use it as the foundation for ALL emails
-
-This example template takes precedence over the standard template structure below.`;
-          } else if (emailTemplate.type === 'structured' && emailTemplate.template_structure) {
-            const structure = emailTemplate.template_structure;
-            customTemplateSection = `
-
-CRITICAL: USER HAS PROVIDED A CUSTOM STRUCTURED TEMPLATE. YOU MUST FOLLOW THESE EXACT REQUIREMENTS.
-
-CUSTOM TEMPLATE STRUCTURE:
-${structure.greeting ? `Greeting: ${structure.greeting}` : ''}
-${structure.opening ? `Opening: ${structure.opening}` : ''}
-${structure.body ? `Body: ${structure.body}` : ''}
-${structure.cta ? `CTA: ${structure.cta}` : ''}
-${structure.closing ? `Closing: ${structure.closing}` : ''}
-
-${emailTemplate.instructions ? `ADDITIONAL TEMPLATE INSTRUCTIONS:\n${emailTemplate.instructions}\n` : ''}
-
-REQUIREMENTS FOR USING THIS TEMPLATE:
-1. Follow the EXACT structure requirements above
-2. Use the specified greeting, opening, body, CTA, and closing formats
-3. Personalize content while maintaining the structure
-4. Use {first_name}, {company}, {title} placeholders as needed
-5. DO NOT deviate from these structure requirements
-
-This custom structured template takes precedence over the standard template structure below.`;
-          }
-        }
-
-        const systemPrompt = `You are an elite cold email writer who crafts highly personalized, contextually relevant emails that feel like they were written specifically for each individual prospect.
-
-${customTemplateSection ? customTemplateSection : `CRITICAL: YOU MUST FOLLOW THE EXACT EMAIL TEMPLATE STRUCTURE BELOW. NO EXCEPTIONS.
-
-${STANDARD_EMAIL_TEMPLATE.structure}
-
-TEMPLATE ENFORCEMENT RULES:
-1. ALWAYS use the exact structure: Greeting → Opening → Body → CTA → Closing → Signature
-2. Greeting MUST be "Hi {first_name}," for casual tone OR "Dear {mr_ms} {last_name}," for formal tone
-3. Opening MUST be exactly 1 sentence (15-25 words), leading with value/insight
-4. Body MUST be 2-3 sentences (40-60 words total)
-5. CTA MUST be exactly 1 sentence (10-15 words) with a clear, low-pressure ask
-6. Closing MUST be "Best," OR "Regards," OR "Thanks," followed by signature
-7. Signature MUST use {signature} placeholder (will be replaced automatically)`}
-
-PERSONALIZATION REQUIREMENTS:
-- Use {first_name}, {company}, {title} variables throughout
-- Reference specific details from ENRICHED PROFILE DATA when available
-- NEVER use generic phrases like "I noticed" or "I came across your profile"
-- Lead with value or insight, not your needs
-
-WRITING QUALITY:
-- Subject line: Under 50 characters, curiosity-driven, no clickbait
-- Word count: 80-120 words total (strictly enforced, unless custom template specifies otherwise)
-- Tone: Match the requested style perfectly (casual/formal/witty)
-- Grammar: Flawless spelling and grammar
-- Personalization: Feel deeply researched, not templated
-
-ABSOLUTE REQUIREMENTS:
-✓ Follow exact template structure (custom template if provided, otherwise standard template)
-✓ Use {signature} placeholder (never "[Your Name]" or actual name)
-✓ Replace {first_name}, {company}, {title} with placeholders (will be replaced automatically)
-✓ Ensure word count is between 80-120 words (unless custom template specifies otherwise)
-✓ Include clear call to action`;
-
-        // Build enriched profile data section for personalization
-        let enrichedProfileSection = '';
-        if (prospect.profile_data) {
-          const pd = prospect.profile_data;
-          const profileParts: string[] = [];
+        // Initialize variables
+        let parsedSubject = '';
+        let parsedBody = '';
+        const senderName = 'Hari'; // Default sender name
+        
+        // SIMPLE LOGIC: Use template if it exists, otherwise generate
+        const templateBody = emailTemplate?.example_email?.body?.trim() || templateCheckBody?.trim() || null;
+        
+        if (templateBody) {
+          // Use template - simple and direct
+          parsedBody = templateBody;
+          parsedSubject = emailTemplate?.example_email?.subject 
+            ? replacePlaceholders(emailTemplate.example_email.subject, prospect, senderName)
+            : 'Quick question';
           
-          // Profile summary and headline
-          if (pd.profile?.headline) {
-            profileParts.push(`Headline: ${pd.profile.headline}`);
-          }
-          if (pd.profile?.summary) {
-            profileParts.push(`Summary: ${pd.profile.summary.substring(0, 300)}`);
-          }
-          if (pd.profile?.location) {
-            profileParts.push(`Location: ${pd.profile.location}`);
-          }
-          
-          // Skills (top 10)
-          if (pd.profile?.skills && Array.isArray(pd.profile.skills) && pd.profile.skills.length > 0) {
-            profileParts.push(`Skills: ${pd.profile.skills.slice(0, 10).join(', ')}`);
-          }
-          
-          // Recent experience (last 3 roles)
-          if (pd.experience && Array.isArray(pd.experience) && pd.experience.length > 0) {
-            const recentExp = pd.experience.slice(0, 3).map((exp: any) => {
-              let expStr = `${exp?.title || 'Role'} at ${exp?.company_name || 'Company'}`;
-              if (exp?.description) {
-                expStr += ` - ${exp.description.substring(0, 150)}`;
-              }
-              return expStr;
-            }).join('\n');
-            profileParts.push(`Recent Experience:\n${recentExp}`);
-          }
-          
-          // Education
-          if (pd.education && Array.isArray(pd.education) && pd.education.length > 0) {
-            const edu = pd.education.slice(0, 2).map((ed: any) => {
-              return `${ed?.degree || 'Degree'} in ${ed?.field_of_study || 'Field'} from ${ed?.school_name || 'School'}`;
-            }).join(', ');
-            profileParts.push(`Education: ${edu}`);
-          }
-          
-          // Recent posts (if available, first 200 chars)
-          if (pd.profile?.posts) {
-            profileParts.push(`Recent Activity/Posts: ${pd.profile.posts.substring(0, 200)}`);
-          }
-          
-          if (profileParts.length > 0) {
-            enrichedProfileSection = `\n\nENRICHED PROFILE DATA (from LinkedIn):\n${profileParts.join('\n\n')}\n`;
-          }
-        }
-
-        // Build template-specific instructions
-        let templateGuidance = '';
-        if (emailTemplate) {
-          if (emailTemplate.type === 'example' && emailTemplate.example_email) {
-            templateGuidance = `
-
-CUSTOM EXAMPLE TEMPLATE TO FOLLOW:
-Subject pattern: "${emailTemplate.example_email.subject}"
-Body structure: Follow the exact style and format of:
-${emailTemplate.example_email.body}
-
-Use this example as your guide - maintain the same structure, tone, and flow while personalizing for ${prospect.name}.`;
-          } else if (emailTemplate.type === 'structured' && emailTemplate.template_structure) {
-            const struct = emailTemplate.template_structure;
-            templateGuidance = `
-
-CUSTOM STRUCTURED TEMPLATE REQUIREMENTS:
-${struct.greeting ? `- Greeting: ${struct.greeting}` : ''}
-${struct.opening ? `- Opening: ${struct.opening}` : ''}
-${struct.body ? `- Body: ${struct.body}` : ''}
-${struct.cta ? `- CTA: ${struct.cta}` : ''}
-${struct.closing ? `- Closing: ${struct.closing}` : ''}
-${emailTemplate.instructions ? `- Additional instructions: ${emailTemplate.instructions}` : ''}
-
-Follow these exact requirements while personalizing for ${prospect.name}.`;
-          }
+          await updateExecutionLog(supabase, execution_id, `[3/3] 📧 Using template for ${prospect.name}...`);
         } else {
-          templateGuidance = `
+          // No template - generate with AI
+          await updateExecutionLog(supabase, execution_id, `[3/3] 🤖 Gemini: Generating email ${i + 1}/${prospects.length} for ${prospect.name}...`);
+          
+          // Build tone and goal instructions
+          const toneMap: Record<string, string> = {
+            professional: 'professional and polished',
+            casual: 'conversational and friendly',
+            friendly: 'warm and approachable',
+          };
+          const toneInstruction = toneMap[config.tone] || 'conversational';
 
-STANDARD TEMPLATE STRUCTURE (use if no custom template):
-- Line 1: Greeting (Hi {first_name},)
-- Line 2: Empty line
-- Line 3: Opening sentence (value/insight)
-- Line 4: Empty line
-- Line 5: Body paragraph (2-3 sentences)
-- Line 6: Empty line
-- Line 7: CTA sentence
-- Line 8: Empty line
-- Line 9: Closing (Best,)
-- Line 10: Signature ({signature})`;
-        }
+          const goalMap: Record<string, string> = {
+            meeting: 'schedule a meeting',
+            demo: 'book a demo',
+            call: 'schedule a call',
+            information: 'gather information',
+            partnership: 'explore a potential partnership',
+            other: 'start a conversation',
+          };
+          const goalInstruction = goalMap[config.goal] || 'start a conversation';
 
-        const userPrompt = `${contextSummary}
+          // Build conversation context summary
+          let contextSummary = '';
+          const safeConversationContext = Array.isArray(conversationContext) ? conversationContext : [];
+          if (safeConversationContext.length > 0) {
+            const relevantMessages = safeConversationContext
+              .filter((msg: any) => msg && msg.role && (msg.role === 'user' || (msg.role === 'assistant' && msg.content && msg.content.length < 500)))
+              .slice(-10);
+            if (relevantMessages.length > 0) {
+              contextSummary = `\n\nCAMPAIGN CONTEXT FROM CONVERSATION:\n${relevantMessages.map((m: any) => `${m.role}: ${m.content}`).join('\n')}\n`;
+            }
+          }
+
+          // Build enriched profile data section for personalization
+          let enrichedProfileSection = '';
+          if (prospect.profile_data) {
+            const pd = prospect.profile_data;
+            const profileParts: string[] = [];
+            
+            if (pd.profile?.headline) profileParts.push(`Headline: ${pd.profile.headline}`);
+            if (pd.profile?.summary) profileParts.push(`Summary: ${pd.profile.summary.substring(0, 300)}`);
+            if (pd.profile?.location) profileParts.push(`Location: ${pd.profile.location}`);
+            if (pd.profile?.skills && Array.isArray(pd.profile.skills) && pd.profile.skills.length > 0) {
+              profileParts.push(`Skills: ${pd.profile.skills.slice(0, 10).join(', ')}`);
+            }
+            if (pd.experience && Array.isArray(pd.experience) && pd.experience.length > 0) {
+              const recentExp = pd.experience.slice(0, 3).map((exp: any) => {
+                let expStr = `${exp?.title || 'Role'} at ${exp?.company_name || 'Company'}`;
+                if (exp?.description) expStr += ` - ${exp.description.substring(0, 150)}`;
+                return expStr;
+              }).join('\n');
+              profileParts.push(`Recent Experience:\n${recentExp}`);
+            }
+            if (pd.education && Array.isArray(pd.education) && pd.education.length > 0) {
+              const edu = pd.education.slice(0, 2).map((ed: any) => {
+                return `${ed?.degree || 'Degree'} in ${ed?.field_of_study || 'Field'} from ${ed?.school_name || 'School'}`;
+              }).join(', ');
+              profileParts.push(`Education: ${edu}`);
+            }
+            if (pd.profile?.posts) {
+              profileParts.push(`Recent Activity/Posts: ${pd.profile.posts.substring(0, 200)}`);
+            }
+            
+            if (profileParts.length > 0) {
+              enrichedProfileSection = `\n\nENRICHED PROFILE DATA (from LinkedIn):\n${profileParts.join('\n\n')}\n`;
+            }
+          }
+
+          const systemPrompt = `You are an elite cold email writer. Write personalized, compelling emails.
+
+CRITICAL: Follow this exact structure:
+- Greeting: "Dear {mr_ms} {last_name},"
+- Opening: 1 sentence (15-25 words) with value/insight
+- Body: 2-3 sentences (40-60 words total)
+- CTA: 1 sentence (10-15 words) with clear ask
+- Closing: "Best," or "Regards,"
+- Signature: {signature} placeholder
+
+REQUIREMENTS:
+- Subject: Under 50 characters, curiosity-driven
+- Word count: 80-120 words total
+- Tone: ${toneInstruction}
+- Goal: ${goalInstruction}
+- Use {first_name}, {company}, {title} placeholders
+- Reference enriched profile data when available
+- Include line breaks (\\n) between sections`;
+
+          const userPrompt = `${contextSummary}
 
 PROSPECT DETAILS:
 Name: ${prospect.name}
@@ -1061,171 +1261,126 @@ TARGET CRITERIA:
 ${JSON.stringify(targetCriteria, null, 2)}
 
 ${instructions ? `CAMPAIGN INSTRUCTIONS:\n${instructions}\n` : ''}
-${templateGuidance}
 
-REQUIRED STYLE:
-Tone: ${toneInstruction}
-Goal: ${goalInstruction}
-Word Count: ${emailTemplate?.instructions?.match(/under (\d+)|(\d+) words/i) ? 'Follow custom template instructions' : '80-120 words'}
-
-IMPORTANT:
-- Reference their specific role (${prospect.title}) and company (${prospect.company})
-${prospect.profile_data ? '- Use the ENRICHED PROFILE DATA above to make highly personalized references:\n  * Mention specific skills they have\n  * Reference their recent experience or career trajectory\n  * Note their education background if relevant\n  * Reference any recent posts or activity if available\n  * Make it feel like you\'ve deeply researched them' : '- Make it feel like you\'ve done research on them specifically'}
-- Use conversational language that matches the tone
-- Subject line must be under 50 characters
-- Focus on THEIR potential benefit, not your offering
-- If instructed to use titles (Mr./Ms.), use them appropriately (e.g., "Dear Mr. Smith" or "Hi Ms. Johnson")
-- ALWAYS sign the email with the sender's name (extracted from Gmail account) - NEVER use "[Your Name]", "[your name]", or any placeholder
-- Replace {first_name}, {company}, {title} variables with actual values
-- Use the placeholder variables in the body, they will be replaced automatically
-- The signature will be automatically filled in with the Gmail account name
-
-CRITICAL OUTPUT FORMAT - FOLLOW EXACTLY:
-
-Return ONLY a JSON object with this exact format:
+Return ONLY a JSON object:
 {
   "subject": "curiosity-driven subject under 50 chars",
-  "body": "${emailTemplate?.type === 'example' && emailTemplate.example_email?.body 
-    ? emailTemplate.example_email.body
-        .replace(/\\/g, '\\\\')
-        .replace(/"/g, '\\"')
-        .replace(/\n/g, '\\n')
-        .replace(/\{first_name\}/g, '{first_name}')
-        .replace(/\{company\}/g, '{company}')
-        .replace(/\{title\}/g, '{title}')
-        .replace(/\[Your Name\]/gi, '{signature}')
-        .replace(/\[your name\]/gi, '{signature}')
-    : 'Hi {first_name},\\n\\n[Opening sentence - 15-25 words with value/insight]\\n\\n[Body paragraph - 2-3 sentences, 40-60 words total]\\n\\n[CTA sentence - 10-15 words with clear ask]\\n\\nBest,\\n{signature}'}"
-}
+  "body": "Dear {mr_ms} {last_name},\\n\\n[Opening sentence]\\n\\n[Body paragraph]\\n\\n[CTA]\\n\\nBest,\\n{signature}"
+}`;
 
-${emailTemplate ? 'CRITICAL: USE THE CUSTOM TEMPLATE PROVIDED ABOVE. Follow its exact structure, style, tone, and format while personalizing the content for this specific prospect. The template structure is non-negotiable - maintain it exactly.' : 'Follow the standard template structure. Every email must follow this exact format.'}`;
-
-        // Generate email using Gemini
-        console.log(`Calling Gemini for prospect ${i + 1}`);
-        
-        const geminiResponse = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${geminiApiKey}`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              contents: [
-                {
-                  role: 'user',
-                  parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }]
+          // Generate email using Gemini
+          const geminiResponse = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${geminiApiKey}`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                contents: [
+                  {
+                    role: 'user',
+                    parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }]
+                  }
+                ],
+                generationConfig: {
+                  maxOutputTokens: 300,
+                  temperature: 0.7,
                 }
-              ],
-              generationConfig: {
-                maxOutputTokens: 300,
-                temperature: 0.7,
-              }
-            })
-          }
-        );
-
-        if (!geminiResponse.ok) {
-          const errorText = await geminiResponse.text();
-          console.error(`Gemini API error for prospect ${i + 1}:`, errorText);
-          // Log detailed error information
-          await updateExecutionLog(
-            supabase,
-            execution_id,
-            `❌ Gemini API error for ${prospect.name} (${geminiResponse.status}): ${errorText.substring(0, 200)}`
+              })
+            }
           );
+
+          if (!geminiResponse.ok) {
+            const errorText = await geminiResponse.text();
+            throw new Error(`Gemini API error (${geminiResponse.status}): ${errorText}`);
+          }
+
+          const geminiData = await geminiResponse.json();
+          const generatedContent = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || '';
           
-          throw new Error(`Gemini API error (${geminiResponse.status}): ${errorText}`);
-        }
-
-        const geminiData = await geminiResponse.json();
-        console.log(`Gemini response data for prospect ${i + 1}:`, JSON.stringify(geminiData).substring(0, 500));
-        
-        const generatedContent = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || '';
-        
-        if (!generatedContent) {
-          console.error(`No content in Gemini response for prospect ${i + 1}:`, JSON.stringify(geminiData));
-          await updateExecutionLog(
-            supabase,
-            execution_id,
-            `❌ No content generated from Gemini for ${prospect.name}. Response: ${JSON.stringify(geminiData).substring(0, 200)}`
-          );
-          throw new Error(`No content generated from Gemini for prospect ${i + 1}`);
-        }
-
-        // Parse JSON response from Gemini
-        let parsedSubject = '';
-        let parsedBody = '';
-        
-        try {
-          // Try to parse as JSON first (expected format)
-          const jsonMatch = generatedContent.match(/\{[\s\S]*\}/);
-          if (jsonMatch) {
-            const parsed = JSON.parse(jsonMatch[0]);
-            parsedSubject = parsed.subject || '';
-            parsedBody = parsed.body || '';
+          if (!generatedContent) {
+            throw new Error(`No content generated from Gemini`);
           }
-        } catch (e) {
-          console.log('Failed to parse as JSON, trying text parsing...');
-        }
-        
-        // Fallback to text parsing if JSON parsing failed
-        if (!parsedSubject || !parsedBody) {
-          const lines = generatedContent ? generatedContent.split('\n') : [];
-          for (let i = 0; i < lines.length; i++) {
-            if (lines[i] && lines[i].toLowerCase().startsWith('subject:')) {
-              parsedSubject = lines[i].replace(/^subject:\\s*/i, '').trim();
-            } else if (parsedSubject && lines[i] && lines[i].trim()) {
-              parsedBody = Array.isArray(lines) ? lines.slice(i).join('\n').trim() : '';
-              break;
+
+          // Parse JSON response from Gemini
+          try {
+            const jsonMatch = generatedContent.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              const parsed = JSON.parse(jsonMatch[0]);
+              parsedSubject = parsed.subject || '';
+              parsedBody = parsed.body || '';
+              parsedBody = parsedBody.replace(/\\n/g, '\n');
+            }
+          } catch (e) {
+            // Fallback parsing
+            const lines = generatedContent.split('\n');
+            for (let j = 0; j < lines.length; j++) {
+              if (lines[j] && lines[j].toLowerCase().startsWith('subject:')) {
+                parsedSubject = lines[j].replace(/^subject:\s*/i, '').trim();
+              } else if (parsedSubject && lines[j] && lines[j].trim()) {
+                parsedBody = lines.slice(j).join('\n').trim();
+                break;
+              }
             }
           }
+
+          if (!parsedSubject) parsedSubject = 'Quick question';
+          if (!parsedBody) parsedBody = generatedContent;
         }
 
-        // Final fallback
-        if (!parsedSubject) {
-          parsedSubject = 'Quick question';
-        }
-        if (!parsedBody) {
-          parsedBody = generatedContent;
-        }
-
-        // Validate and enforce template structure
-        const validation = STANDARD_EMAIL_TEMPLATE.validateStructure(parsedBody);
-        
-        if (!validation.valid) {
-          console.log(`⚠️ Email template validation failed for ${prospect.name}:`, validation.errors);
-          await updateExecutionLog(
-            supabase,
-            execution_id,
-            `⚠️ Template validation warnings for ${prospect.name}: ${validation.errors.join(', ')}`
-          );
+        // Validate and enforce template structure ONLY if no custom template is provided
+        if (!templateBody) {
+          const validation = STANDARD_EMAIL_TEMPLATE.validateStructure(parsedBody);
           
-          // Ensure signature placeholder is present
-          if (!parsedBody.includes('{signature}') && !parsedBody.match(/\[Your Name\]|\[your name\]/i)) {
-            // Add signature if missing
-            const closingMatch = parsedBody.match(/(Best|Regards|Thanks|Thank you|Sincerely)[,\s]*$/i);
-            if (closingMatch) {
-              parsedBody = parsedBody.replace(closingMatch[0], `${closingMatch[0]}\n{signature}`);
-            } else {
+          if (!validation.valid) {
+            console.log(`⚠️ Email template validation failed for ${prospect.name}:`, validation.errors);
+            await updateExecutionLog(
+              supabase,
+              execution_id,
+              `⚠️ Template validation warnings for ${prospect.name}: ${validation.errors.join(', ')}`
+            );
+            
+            // Ensure signature placeholder is present
+            if (!parsedBody.includes('{signature}') && !parsedBody.match(/\[Your Name\]|\[your name\]/i)) {
+              // Add signature if missing
+              const closingMatch = parsedBody.match(/(Best|Regards|Thanks|Thank you|Sincerely)[,\s]*$/i);
+              if (closingMatch) {
+                parsedBody = parsedBody.replace(closingMatch[0], `${closingMatch[0]}\n{signature}`);
+              } else {
+                parsedBody = parsedBody.trim() + '\n\nBest,\n{signature}';
+              }
+            }
+            
+            // Ensure greeting format uses Mr./Ms. with last name
+            if (!parsedBody.match(/^Dear (Mr\.|Ms\.|{mr_ms})/i)) {
+              const nameParts = prospect.name?.split(' ') || [];
+              const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1] : '{last_name}';
+              const firstName = nameParts[0] || '{first_name}';
+              // Determine title prefix (Mr./Ms.) based on first name
+              const femaleEndings = ['a', 'ia', 'ana', 'ina', 'ella', 'ette', 'elle', 'i', 'y'];
+              const firstNameLower = firstName.toLowerCase();
+              const useTitle = femaleEndings.some(ending => firstNameLower.endsWith(ending));
+              const titlePrefix = useTitle ? 'Ms.' : 'Mr.';
+              parsedBody = `Dear ${titlePrefix} ${lastName},\n\n${parsedBody}`;
+            }
+            
+            // Ensure closing format
+            if (!parsedBody.match(/(Best|Regards|Thanks|Thank you|Sincerely)[,\s]*$/i)) {
               parsedBody = parsedBody.trim() + '\n\nBest,\n{signature}';
             }
           }
-          
-          // Ensure greeting format
-          if (!parsedBody.match(/^(Hi|Dear|Hello)/i)) {
-            const firstName = prospect.name?.split(' ')[0] || '{first_name}';
-            parsedBody = `Hi ${firstName},\n\n${parsedBody}`;
-          }
-          
-          // Ensure closing format
-          if (!parsedBody.match(/(Best|Regards|Thanks|Thank you|Sincerely)[,\s]*$/i)) {
-            parsedBody = parsedBody.trim() + '\n\nBest,\n{signature}';
+        } else {
+          // For custom templates, only ensure signature placeholder is present
+          if (templateBody && !parsedBody.includes('{signature}') && !parsedBody.match(/\[Your Name\]|\[your name\]/i)) {
+            const closingMatch = parsedBody.match(/(Best|Regards|Thanks|Thank you|Sincerely|Yours|Cheers)[,\s]*$/i);
+            if (closingMatch) {
+              parsedBody = parsedBody.replace(closingMatch[0], `${closingMatch[0]}\n{signature}`);
+            } else {
+              parsedBody = parsedBody.trim() + '\n\n{signature}';
+            }
           }
         }
-
-        // Default sender name to "Hari" (as per user request)
-        const senderName = 'Hari';
         
         // Replace placeholders and clean up
         parsedBody = replacePlaceholders(parsedBody, prospect, senderName);
@@ -1233,8 +1388,15 @@ ${emailTemplate ? 'CRITICAL: USE THE CUSTOM TEMPLATE PROVIDED ABOVE. Follow its 
         // COMPREHENSIVE duplicate signature removal - catch ALL variations
         // Strategy: Find the LAST occurrence of senderName, then remove any duplicates after that
         
-        // First, normalize whitespace
-        parsedBody = parsedBody.replace(/\s+/g, ' ').replace(/\n\s+/g, '\n').replace(/\s+\n/g, '\n');
+        // First, normalize whitespace (but PRESERVE newlines for proper email formatting)
+        // Normalize line endings first
+        parsedBody = parsedBody.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        // Collapse multiple spaces to single space (but preserve newlines)
+        parsedBody = parsedBody.replace(/[ \t]+/g, ' ');
+        // Clean up spaces around newlines (but keep the newlines)
+        parsedBody = parsedBody.replace(/[ \t]*\n[ \t]*/g, '\n');
+        // Limit excessive consecutive newlines (max 3 for paragraph breaks)
+        parsedBody = parsedBody.replace(/\n{4,}/g, '\n\n\n');
         
         // Find the last occurrence of the signature name
         const lastIndex = parsedBody.toLowerCase().lastIndexOf(senderName.toLowerCase());
@@ -1266,27 +1428,76 @@ ${emailTemplate ? 'CRITICAL: USE THE CUSTOM TEMPLATE PROVIDED ABOVE. Follow its 
         }
         
         // Additional cleanup: Remove any duplicate signatures using regex patterns
-        // Pattern 1: Multiple instances at the end (e.g., "Best,\nHari\nHari" or "Best Hari Hari")
-        const endDuplicatePattern = new RegExp(`(${senderName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})(?:[\\s\\n]+\\1)+\\s*$`, 'gi');
-        parsedBody = parsedBody.replace(endDuplicatePattern, senderName);
-        
-        // Pattern 2: "Best Hari Hari" or "Best, Hari Hari"
-        const closingDuplicatePattern = new RegExp(`(Best|Regards|Thanks|Thank you|Sincerely)[,\\s]*${senderName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s]+${senderName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'gi');
+        // Pattern 1: "Best, Hari Best, Hari" - duplicate closing + signature combo
+        const closingDuplicatePattern = new RegExp(
+          `(Best|Regards|Thanks|Thank you|Sincerely)[,\\s]*${senderName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\n]*(Best|Regards|Thanks|Thank you|Sincerely)[,\\s]*${senderName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`,
+          'gi'
+        );
         parsedBody = parsedBody.replace(closingDuplicatePattern, (match) => {
           const closing = match.match(/(Best|Regards|Thanks|Thank you|Sincerely)/i)?.[0] || 'Best';
           return `${closing},\n${senderName}`;
         });
         
-        // Final pass: If senderName appears more than once in the last 50 characters, keep only the last one
-        const last50Chars = parsedBody.slice(-50);
-        const signatureMatches = last50Chars.match(new RegExp(senderName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'));
-        if (signatureMatches && signatureMatches.length > 1) {
-          // Find the position of the last signature
-          const lastSigIndex = parsedBody.toLowerCase().lastIndexOf(senderName.toLowerCase());
-          if (lastSigIndex !== -1) {
-            // Remove everything after the last signature
-            parsedBody = parsedBody.substring(0, lastSigIndex + senderName.length);
+        // Pattern 2: Multiple instances at the end (e.g., "Best,\nHari\nHari" or "Best Hari Hari")
+        const endDuplicatePattern = new RegExp(`(${senderName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})(?:[\\s\\n]+\\1)+\\s*$`, 'gi');
+        parsedBody = parsedBody.replace(endDuplicatePattern, senderName);
+        
+        // Pattern 3: "Best, Hari Hari" (same closing with duplicate name)
+        const sameClosingDuplicatePattern = new RegExp(
+          `(Best|Regards|Thanks|Thank you|Sincerely)[,\\s]*${senderName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\n]+${senderName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`,
+          'gi'
+        );
+        parsedBody = parsedBody.replace(sameClosingDuplicatePattern, (match) => {
+          const closing = match.match(/(Best|Regards|Thanks|Thank you|Sincerely)/i)?.[0] || 'Best';
+          return `${closing},\n${senderName}`;
+        });
+        
+        // Final pass: Aggressively remove duplicate signatures
+        // Count all occurrences of the signature name in the entire body
+        const signatureRegex = new RegExp(senderName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+        const allMatches = parsedBody.match(signatureRegex);
+        if (allMatches && allMatches.length > 1) {
+          // Find the last occurrence of "Best," or similar closing followed by signature
+          const lastClosingPattern = new RegExp(
+            `(Best|Regards|Thanks|Thank you|Sincerely)[,\\s]*\\s*${senderName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`,
+            'gi'
+          );
+          const lastMatch = parsedBody.match(lastClosingPattern);
+          if (lastMatch) {
+            // Keep everything up to and including the last closing + signature
+            const lastIndex = parsedBody.toLowerCase().lastIndexOf(lastMatch[0].toLowerCase());
+            if (lastIndex !== -1) {
+              parsedBody = parsedBody.substring(0, lastIndex + lastMatch[0].length);
+            }
+          } else {
+            // Fallback: keep only the last occurrence of the signature name
+            const lastSigIndex = parsedBody.toLowerCase().lastIndexOf(senderName.toLowerCase());
+            if (lastSigIndex !== -1) {
+              // Keep everything before the last signature, then add proper closing + signature
+              const beforeLast = parsedBody.substring(0, lastSigIndex).trim();
+              // Check if there's already a closing before the signature
+              const hasClosing = beforeLast.match(/(Best|Regards|Thanks|Thank you|Sincerely)[,\\s]*$/i);
+              if (hasClosing) {
+                parsedBody = beforeLast + '\n' + senderName;
+              } else {
+                parsedBody = beforeLast + '\n\nBest,\n' + senderName;
+              }
+            }
           }
+        }
+        
+        // Final aggressive cleanup: Remove any remaining "Best, Hari Best, Hari" patterns
+        const aggressivePattern = new RegExp(
+          `((Best|Regards|Thanks|Thank you|Sincerely)[,\\s]*\\s*${senderName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\n]*)+`,
+          'gi'
+        );
+        const matches = parsedBody.match(aggressivePattern);
+        if (matches && matches.length > 0) {
+          // Replace all matches with a single "Best,\nHari"
+          parsedBody = parsedBody.replace(aggressivePattern, (match) => {
+            const closing = match.match(/(Best|Regards|Thanks|Thank you|Sincerely)/i)?.[0] || 'Best';
+            return `${closing},\n${senderName}`;
+          });
         }
 
         const subject = parsedSubject;
@@ -1785,8 +1996,10 @@ ${emailTemplate ? 'CRITICAL: USE THE CUSTOM TEMPLATE PROVIDED ABOVE. Follow its 
           summaryBody += `--- Draft ${index + 1} ---\n`;
           summaryBody += `To: ${email.prospect_name}\n`;
           summaryBody += `Email: ${email.prospect_email}\n`;
-          summaryBody += `Subject: ${email.subject}\n`;
-          summaryBody += `\n${email.body}\n`;
+          summaryBody += `Subject: ${email.subject}\n\n`;
+          // Preserve line breaks in email body (ensure newlines are displayed properly)
+          const formattedBody = email.body.replace(/\n/g, '\n'); // Ensure newlines are preserved
+          summaryBody += `${formattedBody}\n`;
           summaryBody += `\n========================================\n\n`;
         });
 

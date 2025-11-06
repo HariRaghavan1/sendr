@@ -67,8 +67,9 @@ EXAMPLE OUTPUT FORMAT:
       errors.push('Missing greeting (Hi/Dear/Hello)');
     }
 
-    // Check for closing
-    if (!emailBody.match(/(Best|Regards|Thanks|Thank you|Sincerely)[,\s]*$/i)) {
+    // Check for closing - don't require it to be at the end, just somewhere in the email
+    // This allows for signatures after the closing
+    if (!emailBody.match(/(Best|Regards|Thanks|Thank you|Sincerely)[,\s]*/i)) {
       errors.push('Missing closing (Best/Regards/Thanks)');
     }
 

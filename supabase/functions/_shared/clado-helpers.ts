@@ -32,23 +32,56 @@ export async function checkCladoCredits(cladoApiKey: string): Promise<{ credits:
 export function buildCladoQuery(targetCriteria: any): string {
   const parts: string[] = [];
   
+  // Job titles are the most important - always include if available
   if (targetCriteria.job_titles?.length) {
-    parts.push(targetCriteria.job_titles.join(' or '));
+    // Filter out empty strings and normalize
+    const validTitles = targetCriteria.job_titles
+      .filter((title: string) => title && title.trim().length > 0)
+      .map((title: string) => title.trim());
+    
+    if (validTitles.length > 0) {
+      // Use "OR" for multiple titles, but keep it simple
+      if (validTitles.length === 1) {
+        parts.push(validTitles[0]);
+      } else {
+        parts.push(validTitles.join(' OR '));
+      }
+    }
   }
   
+  // Location - use simpler format
+  if (targetCriteria.location && targetCriteria.location.trim()) {
+    parts.push(`in ${targetCriteria.location.trim()}`);
+  }
+  
+  // Industry - use simpler format
+  if (targetCriteria.industry && targetCriteria.industry.trim()) {
+    parts.push(`${targetCriteria.industry.trim()} industry`);
+  }
+  
+  // Companies - only if explicitly provided
   if (targetCriteria.companies?.length) {
-    parts.push(`at ${targetCriteria.companies.join(' or ')}`);
+    const validCompanies = targetCriteria.companies
+      .filter((company: string) => company && company.trim().length > 0)
+      .map((company: string) => company.trim());
+    
+    if (validCompanies.length > 0) {
+      if (validCompanies.length === 1) {
+        parts.push(`at ${validCompanies[0]}`);
+      } else {
+        parts.push(`at (${validCompanies.join(' OR ')})`);
+      }
+    }
   }
   
-  if (targetCriteria.location) {
-    parts.push(`in ${targetCriteria.location}`);
-  }
+  // If we have job titles, use them as the base query
+  // Otherwise return a generic query
+  const query = parts.length > 0 ? parts.join(' ') : 'professionals';
   
-  if (targetCriteria.industry) {
-    parts.push(`in ${targetCriteria.industry} industry`);
-  }
+  // Log the query for debugging
+  console.log('Built Clado query:', query, 'from criteria:', JSON.stringify(targetCriteria));
   
-  return parts.join(' ') || 'professionals';
+  return query;
 }
 
 /**
@@ -430,21 +463,68 @@ export async function searchCladoProspects(
   
   console.log('Clado search query:', query);
   
-  const response = await fetch(url.toString(), {
-    method: 'GET',
-    headers: { 
-      'Authorization': `Bearer ${cladoApiKey}`,
-      'Content-Type': 'application/json'
-    }
-  });
+  // Retry logic for search API calls (handle transient failures)
+  const maxSearchRetries = 3;
+  const searchRetryDelay = 2000; // 2 seconds base delay
   
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error(`Clado API error (${response.status}):`, errorText);
-    throw new Error(`Clado API error (${response.status}): ${errorText}`);
+  let lastError: Error | null = null;
+  let response: Response | null = null;
+  let data: any = null;
+  
+  for (let attempt = 1; attempt <= maxSearchRetries; attempt++) {
+    try {
+      response = await fetch(url.toString(), {
+        method: 'GET',
+        headers: { 
+          'Authorization': `Bearer ${cladoApiKey}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      // Retry on 429 (rate limit) or 500-level errors
+      if (!response.ok) {
+        const status = response.status;
+        const errorText = await response.text();
+        
+        // Retry on transient errors
+        if ((status === 429 || status >= 500) && attempt < maxSearchRetries) {
+          const waitTime = searchRetryDelay * Math.pow(2, attempt - 1); // Exponential backoff
+          console.log(`Clado search failed (${status}), retrying in ${waitTime}ms (attempt ${attempt}/${maxSearchRetries})...`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+          lastError = new Error(`Clado API error (${status}): ${errorText}`);
+          continue;
+        }
+        
+        // Don't retry on permanent errors (401, 402, 404)
+        console.error(`Clado API error (${status}):`, errorText);
+        throw new Error(`Clado API error (${status}): ${errorText}`);
+      }
+      
+      // Success - parse response
+      data = await response.json();
+      break; // Exit retry loop on success
+      
+    } catch (error: any) {
+      lastError = error;
+      
+      // Retry on network errors or transient failures
+      if (attempt < maxSearchRetries && (error.message?.includes('fetch') || error.message?.includes('network'))) {
+        const waitTime = searchRetryDelay * Math.pow(2, attempt - 1);
+        console.log(`Clado search network error, retrying in ${waitTime}ms (attempt ${attempt}/${maxSearchRetries})...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+        continue;
+      }
+      
+      // Final attempt failed or non-retryable error
+      throw error;
+    }
   }
   
-  const data = await response.json();
+  // If we exhausted retries without success
+  if (!data) {
+    throw lastError || new Error('Clado search failed after all retries');
+  }
+  
   console.log(`Clado API response:`, {
     has_results: !!data.results,
     results_count: data.results?.length || 0,
