@@ -34,18 +34,29 @@ export const TestRunDialog = ({ open, onOpenChange, campaignId }: TestRunDialogP
         },
       });
 
-      if (error) throw error;
+      if (error) {
+        // Check if error is due to function not being deployed
+        const isDeploymentError = error.message?.includes('404') ||
+                                 error.message?.includes('not found') ||
+                                 error.message?.includes('FunctionsRelayError');
+
+        throw new Error(isDeploymentError
+          ? "The execute-campaign function hasn't been deployed to Supabase. Please deploy it using: supabase functions deploy execute-campaign"
+          : error.message);
+      }
 
       setExecutionId(data.execution_id);
-      
+
       toast({
         title: 'Test run started',
         description: `Testing with ${maxProspects} prospects`,
       });
     } catch (error: any) {
       console.error('Error starting test:', error);
+      const isDeploymentError = error.message?.includes('deployed') || error.message?.includes('FunctionsRelayError');
+
       toast({
-        title: 'Error',
+        title: isDeploymentError ? 'Edge Function Not Deployed' : 'Error',
         description: error.message || 'Failed to start test run',
         variant: 'destructive',
       });

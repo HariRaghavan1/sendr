@@ -52,18 +52,22 @@ serve(async (req) => {
       throw new Error('Email not found');
     }
 
-    // Send via Composio (example - adjust based on actual API)
-    const composioResponse = await fetch('https://api.composio.dev/v1/email/send', {
+    // Send via Composio using GMAIL_SEND_EMAIL action
+    // Note: Users must first connect their Gmail account via Composio dashboard at app.composio.dev
+    // and configure an entity_id for multi-user support
+    const composioResponse = await fetch('https://backend.composio.dev/api/v2/actions/GMAIL_SEND_EMAIL/execute', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${settings.composio_api_key}`,
+        'X-API-Key': settings.composio_api_key,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        to: email.prospects.email,
-        subject: email.subject,
-        body: email.body + '\n\n---\nUnsubscribe: [unsubscribe link]',
-        from: user.email,
+        entityId: user.id, // Using user ID as entity ID - users must connect Gmail first
+        input: {
+          recipient_email: email.prospects.email,
+          subject: email.subject,
+          body: email.body + '\n\n---\nUnsubscribe: [unsubscribe link]',
+        },
       }),
     });
 

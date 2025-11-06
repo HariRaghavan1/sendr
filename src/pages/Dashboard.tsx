@@ -1,15 +1,19 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Plus, Sparkles, TrendingUp, Users, Mail, Target } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { toast } from "sonner";
+import { CampaignCardSkeleton, CampaignListSkeleton } from "@/components/CampaignCardSkeleton";
+
+type Campaign = Database['public']['Tables']['campaigns']['Row'];
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const [campaigns, setCampaigns] = useState<any[]>([]);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [stats, setStats] = useState({
     totalCampaigns: 0,
     activeCampaigns: 0,
@@ -23,32 +27,89 @@ export default function Dashboard() {
   }, []);
 
   const loadDashboard = async () => {
-    const { data, error } = await supabase
-      .from("campaigns")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(5);
+    try {
+      // Load recent campaigns
+      const { data: recentCampaigns, error: campaignsError } = await supabase
+        .from("campaigns")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(5);
 
-    if (error) {
-      toast.error("Failed to load dashboard");
-    } else {
-      const campaigns = data || [];
+      if (campaignsError) throw campaignsError;
+
+      // Load stats efficiently with separate queries
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      // Get total count
+      const { count: totalCount, error: totalError } = await supabase
+        .from("campaigns")
+        .select("*", { count: 'exact', head: true })
+        .eq("user_id", user.id);
+
+      if (totalError) throw totalError;
+
+      // Get active count
+      const { count: activeCount, error: activeError } = await supabase
+        .from("campaigns")
+        .select("*", { count: 'exact', head: true })
+        .eq("user_id", user.id)
+        .eq("status", "active");
+
+      if (activeError) throw activeError;
+
+      // Calculate sent and replied from recent campaigns (or load separately if needed)
+      const campaigns = recentCampaigns || [];
       setCampaigns(campaigns);
-      
+
       setStats({
-        totalCampaigns: campaigns.length,
-        activeCampaigns: campaigns.filter((c) => c.status === "active").length,
+        totalCampaigns: totalCount || 0,
+        activeCampaigns: activeCount || 0,
         totalSent: campaigns.reduce((sum, c) => sum + (c.total_sent || 0), 0),
         totalReplied: campaigns.reduce((sum, c) => sum + (c.total_replied || 0), 0),
       });
+    } catch (error) {
+      console.error("Error loading dashboard:", error);
+      toast.error("Failed to load dashboard");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+      <div className="flex-1 p-8 overflow-auto">
+        <div className="max-w-7xl mx-auto space-y-8">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+              <p className="text-muted-foreground mt-1">
+                Overview of your outreach campaigns
+              </p>
+            </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <CampaignCardSkeleton />
+            <CampaignCardSkeleton />
+            <CampaignCardSkeleton />
+            <CampaignCardSkeleton />
+          </div>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Recent Campaigns</CardTitle>
+                  <CardDescription>Your latest outreach workflows</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <CampaignListSkeleton />
+            </CardContent>
+          </Card>
+        </div>
       </div>
     );
   }
@@ -56,14 +117,19 @@ export default function Dashboard() {
   return (
     <div className="flex-1 p-8 overflow-auto">
       <div className="max-w-7xl mx-auto space-y-8">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
             <p className="text-muted-foreground mt-1">
               Overview of your outreach campaigns
             </p>
           </div>
-          <Button onClick={() => navigate("/campaigns/ai-create")} size="lg">
+          <Button
+            onClick={() => navigate("/campaigns/ai-create")}
+            size="lg"
+            aria-label="Create new campaign with AI assistant"
+            className="w-full sm:w-auto"
+          >
             <Sparkles className="mr-2 h-4 w-4" />
             Create Campaign
           </Button>

@@ -6,16 +6,35 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "./components/AppSidebar";
 import { ProtectedRoute } from "./components/ProtectedRoute";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import Settings from "./pages/Settings";
 import CampaignCreate from "./pages/CampaignCreate";
+import CampaignEdit from "./pages/CampaignEdit";
 import ConversationView from "./pages/ConversationView";
 import CampaignDetail from "./pages/CampaignDetail";
 import Workflows from "./pages/Workflows";
 import NotFound from "./pages/NotFound";
+import { toast } from "sonner";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 5 * 60 * 1000, // 5 minutes
+      gcTime: 10 * 60 * 1000, // 10 minutes (formerly cacheTime)
+      retry: 1,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: 'always',
+    },
+    mutations: {
+      retry: 1,
+      onError: (error) => {
+        toast.error(error instanceof Error ? error.message : 'An error occurred');
+      },
+    },
+  },
+});
 
 function LayoutWithSidebar({ children }: { children: React.ReactNode }) {
   return (
@@ -33,81 +52,52 @@ function LayoutWithSidebar({ children }: { children: React.ReactNode }) {
   );
 }
 
+// Wrapper component for protected routes with sidebar layout
+function ProtectedLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <SidebarProvider>
+      <LayoutWithSidebar>
+        <ProtectedRoute>{children}</ProtectedRoute>
+      </LayoutWithSidebar>
+    </SidebarProvider>
+  );
+}
+
+// Wrapper component for public routes with sidebar layout
+function PublicLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <SidebarProvider>
+      <LayoutWithSidebar>
+        {children}
+      </LayoutWithSidebar>
+    </SidebarProvider>
+  );
+}
+
 const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <BrowserRouter>
-      <TooltipProvider>
-        <Toaster />
-        <Sonner />
-        <Routes>
-          <Route path="/auth" element={<Auth />} />
-          <Route path="/" element={
-            <SidebarProvider>
-              <LayoutWithSidebar>
-                <Navigate to="/dashboard" replace />
-              </LayoutWithSidebar>
-            </SidebarProvider>
-          } />
-          <Route path="/dashboard" element={
-            <SidebarProvider>
-              <LayoutWithSidebar>
-                <ProtectedRoute><Dashboard /></ProtectedRoute>
-              </LayoutWithSidebar>
-            </SidebarProvider>
-          } />
-          <Route path="/workflows" element={
-            <SidebarProvider>
-              <LayoutWithSidebar>
-                <ProtectedRoute><Workflows /></ProtectedRoute>
-              </LayoutWithSidebar>
-            </SidebarProvider>
-          } />
-          <Route path="/settings" element={
-            <SidebarProvider>
-              <LayoutWithSidebar>
-                <ProtectedRoute><Settings /></ProtectedRoute>
-              </LayoutWithSidebar>
-            </SidebarProvider>
-          } />
-          <Route path="/campaigns/new" element={
-            <SidebarProvider>
-              <LayoutWithSidebar>
-                <ProtectedRoute><CampaignCreate /></ProtectedRoute>
-              </LayoutWithSidebar>
-            </SidebarProvider>
-          } />
-          <Route path="/campaigns/ai-create" element={
-            <SidebarProvider>
-              <LayoutWithSidebar>
-                <ProtectedRoute><ConversationView /></ProtectedRoute>
-              </LayoutWithSidebar>
-            </SidebarProvider>
-          } />
-          <Route path="/campaigns/ai-create/:conversationId" element={
-            <SidebarProvider>
-              <LayoutWithSidebar>
-                <ProtectedRoute><ConversationView /></ProtectedRoute>
-              </LayoutWithSidebar>
-            </SidebarProvider>
-          } />
-          <Route path="/campaigns/:id" element={
-            <SidebarProvider>
-              <LayoutWithSidebar>
-                <ProtectedRoute><CampaignDetail /></ProtectedRoute>
-              </LayoutWithSidebar>
-            </SidebarProvider>
-          } />
-          <Route path="*" element={
-            <SidebarProvider>
-              <LayoutWithSidebar>
-                <NotFound />
-              </LayoutWithSidebar>
-            </SidebarProvider>
-          } />
-        </Routes>
-      </TooltipProvider>
-    </BrowserRouter>
-  </QueryClientProvider>
+  <ErrorBoundary>
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <TooltipProvider>
+          <Toaster />
+          <Sonner />
+          <Routes>
+            <Route path="/auth" element={<Auth />} />
+            <Route path="/" element={<PublicLayout><Navigate to="/dashboard" replace /></PublicLayout>} />
+            <Route path="/dashboard" element={<ProtectedLayout><Dashboard /></ProtectedLayout>} />
+            <Route path="/workflows" element={<ProtectedLayout><Workflows /></ProtectedLayout>} />
+            <Route path="/settings" element={<ProtectedLayout><Settings /></ProtectedLayout>} />
+            <Route path="/campaigns/new" element={<ProtectedLayout><CampaignCreate /></ProtectedLayout>} />
+            <Route path="/campaigns/:id/edit" element={<ProtectedLayout><CampaignEdit /></ProtectedLayout>} />
+            <Route path="/campaigns/ai-create" element={<ProtectedLayout><ConversationView /></ProtectedLayout>} />
+            <Route path="/campaigns/ai-create/:conversationId" element={<ProtectedLayout><ConversationView /></ProtectedLayout>} />
+            <Route path="/campaigns/:id" element={<ProtectedLayout><CampaignDetail /></ProtectedLayout>} />
+            <Route path="*" element={<PublicLayout><NotFound /></PublicLayout>} />
+          </Routes>
+        </TooltipProvider>
+      </BrowserRouter>
+    </QueryClientProvider>
+  </ErrorBoundary>
 );
 
 export default App;

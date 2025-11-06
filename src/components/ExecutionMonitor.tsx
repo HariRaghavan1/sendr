@@ -2,13 +2,28 @@ import { useRealtimeExecution } from '@/hooks/useRealtimeExecution';
 import { Progress } from './ui/progress';
 import { Badge } from './ui/badge';
 import { ScrollArea } from './ui/scroll-area';
-import { CheckCircle2, XCircle, Loader2, Clock } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
+import { CheckCircle2, XCircle, Loader2, Clock, Search, Sparkles, Mail, TrendingUp, Users, Zap } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
+import { ProspectGrid, type Prospect } from './ProspectCard';
+import { EmailPreviewList, type EmailData } from './EmailPreviewCard';
 
 interface ExecutionMonitorProps {
   executionId: string;
 }
 
+/**
+ * ExecutionMonitor - Dynamic real-time execution tracking with rich UI
+ *
+ * Features:
+ * - Live prospect cards appearing as they're found
+ * - Email previews with quality scores
+ * - Visual step timeline
+ * - Performance metrics
+ * - Activity logs
+ * - Tab-based organization
+ */
 export const ExecutionMonitor = ({ executionId }: ExecutionMonitorProps) => {
   const { execution, loading } = useRealtimeExecution(executionId);
 
@@ -19,6 +34,56 @@ export const ExecutionMonitor = ({ executionId }: ExecutionMonitorProps) => {
       </div>
     );
   }
+
+  // Extract structured data from execution
+  const prospects: Prospect[] = execution.prospects_data || [];
+  const emails: EmailData[] = execution.emails_data || [];
+  const performanceMetrics = execution.performance_metrics || {};
+
+  // Calculate average email quality
+  const avgQuality = emails.length > 0
+    ? emails.reduce((sum, email) => sum + (email.quality_score || 0), 0) / emails.length
+    : 0;
+
+  // Calculate total execution time
+  const totalTimeMs = performanceMetrics.total_duration_ms || 0;
+  const totalTimeSec = Math.round(totalTimeMs / 1000);
+
+  // Detect current step from latest log message
+  const getCurrentStep = () => {
+    if (!execution.progress_logs || execution.progress_logs.length === 0) return null;
+
+    const latestLog = execution.progress_logs[execution.progress_logs.length - 1];
+    const message = latestLog.message?.toLowerCase() || '';
+
+    // Check in order of specificity (more specific checks first)
+    if (message.includes('complete') || message.includes('finish')) {
+      return { name: 'Completed', icon: CheckCircle2, color: 'text-success', status: 'completed' };
+    } else if (message.includes('sending') || message.includes('sent')) {
+      return { name: 'Sending Emails', icon: Mail, color: 'text-green-500', status: 'running' };
+    } else if (message.includes('clado') || message.includes('searching') || message.includes('prospects')) {
+      return { name: 'Finding Prospects', icon: Search, color: 'text-blue-500', status: 'running' };
+    } else if (message.includes('openai') || message.includes('generating') || message.includes('email')) {
+      return { name: 'Generating Emails', icon: Sparkles, color: 'text-purple-500', status: 'running' };
+    }
+
+    return { name: 'Initializing', icon: Loader2, color: 'text-muted-foreground', status: 'running' };
+  };
+
+  const currentStep = getCurrentStep();
+
+  // Define workflow steps for visual timeline
+  const workflowSteps = [
+    { name: 'Initializing', icon: Loader2, color: 'text-gray-500' },
+    { name: 'Finding Prospects', icon: Search, color: 'text-blue-500' },
+    { name: 'Generating Emails', icon: Sparkles, color: 'text-purple-500' },
+    { name: 'Completed', icon: CheckCircle2, color: 'text-green-500' },
+  ];
+
+  // Determine which step is active
+  const activeStepIndex = currentStep
+    ? workflowSteps.findIndex(step => step.name === currentStep.name)
+    : 0;
 
   const progress = execution.total_prospects > 0
     ? (execution.processed_prospects / execution.total_prospects) * 100
@@ -53,7 +118,7 @@ export const ExecutionMonitor = ({ executionId }: ExecutionMonitorProps) => {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -70,45 +135,202 @@ export const ExecutionMonitor = ({ executionId }: ExecutionMonitorProps) => {
         {getStatusBadge()}
       </div>
 
-      {/* Progress */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">Progress</span>
-          <span className="font-medium text-foreground">
-            {execution.processed_prospects} / {execution.total_prospects}
-          </span>
-        </div>
-        <Progress value={progress} className="h-2" />
-        <p className="text-xs text-muted-foreground text-right">
-          {Math.round(progress)}% complete
-        </p>
+      {/* Performance Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card className="border-border/50">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-blue-500/10">
+                <Users className="h-5 w-5 text-blue-500" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-foreground">{prospects.length}</p>
+                <p className="text-xs text-muted-foreground">Prospects Found</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-border/50">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-purple-500/10">
+                <Mail className="h-5 w-5 text-purple-500" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-foreground">{emails.length}</p>
+                <p className="text-xs text-muted-foreground">Emails Generated</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-border/50">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-green-500/10">
+                <TrendingUp className="h-5 w-5 text-green-500" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-foreground">{Math.round(avgQuality)}</p>
+                <p className="text-xs text-muted-foreground">Avg Quality Score</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Logs */}
-      <div className="space-y-2">
-        <h4 className="text-sm font-medium text-foreground">Activity Log</h4>
-        <ScrollArea className="h-[300px] rounded-lg border border-border bg-card">
-          <div className="p-4 space-y-2">
-            {execution.progress_logs && execution.progress_logs.length > 0 ? (
-              execution.progress_logs.map((log: any, index: number) => (
-                <div key={index} className="flex items-start gap-2 text-sm">
-                  <Clock className="h-3 w-3 mt-1 text-muted-foreground flex-shrink-0" />
-                  <div className="flex-1">
-                    <p className="text-foreground">{log.message}</p>
-                    {log.timestamp && (
-                      <p className="text-xs text-muted-foreground">
-                        {new Date(log.timestamp).toLocaleTimeString()}
-                      </p>
-                    )}
+      {/* Visual Step Timeline */}
+      <Card className="border-border/50">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium">Workflow Progress</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-between mb-4">
+            {workflowSteps.map((step, index) => {
+              const isActive = index === activeStepIndex;
+              const isCompleted = index < activeStepIndex || execution.status === 'completed';
+              const StepIcon = step.icon;
+
+              return (
+                <div key={index} className="flex flex-col items-center flex-1">
+                  <div
+                    className={`
+                      w-10 h-10 rounded-full flex items-center justify-center mb-2 transition-all
+                      ${isCompleted ? 'bg-success/20 border-2 border-success' :
+                        isActive ? 'bg-primary/20 border-2 border-primary' :
+                        'bg-muted border-2 border-border'}
+                    `}
+                  >
+                    <StepIcon
+                      className={`
+                        h-5 w-5
+                        ${isCompleted ? 'text-success' :
+                          isActive ? 'text-primary' :
+                          'text-muted-foreground'}
+                        ${isActive && step.icon === Loader2 ? 'animate-spin' : ''}
+                      `}
+                    />
                   </div>
+                  <p className={`
+                    text-xs text-center
+                    ${isActive ? 'font-medium text-foreground' : 'text-muted-foreground'}
+                  `}>
+                    {step.name}
+                  </p>
+                  {index < workflowSteps.length - 1 && (
+                    <div
+                      className={`
+                        absolute h-0.5 w-full top-5 left-1/2 -z-10
+                        ${isCompleted ? 'bg-success' : 'bg-border'}
+                      `}
+                      style={{ width: 'calc(100% / 3)' }}
+                    />
+                  )}
                 </div>
-              ))
-            ) : (
-              <p className="text-sm text-muted-foreground">No logs yet...</p>
-            )}
+              );
+            })}
           </div>
-        </ScrollArea>
-      </div>
+
+          {/* Progress Bar */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Progress</span>
+              <span className="font-medium text-foreground">
+                {execution.processed_prospects} / {execution.total_prospects}
+              </span>
+            </div>
+            <Progress value={progress} className="h-2" />
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>{Math.round(progress)}% complete</span>
+              {totalTimeSec > 0 && (
+                <span className="flex items-center gap-1">
+                  <Zap className="h-3 w-3" />
+                  {totalTimeSec}s elapsed
+                </span>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Tabbed Content: Prospects, Emails, Logs */}
+      <Tabs defaultValue="prospects" className="w-full">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="prospects" className="relative">
+            Prospects
+            {prospects.length > 0 && (
+              <Badge variant="secondary" className="ml-2 h-5 px-1.5 text-xs">
+                {prospects.length}
+              </Badge>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="emails" className="relative">
+            Emails
+            {emails.length > 0 && (
+              <Badge variant="secondary" className="ml-2 h-5 px-1.5 text-xs">
+                {emails.length}
+              </Badge>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="logs">Activity Logs</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="prospects" className="space-y-4 mt-4">
+          <ProspectGrid
+            prospects={prospects}
+            loading={false}
+            variant="default"
+            emptyMessage={
+              execution.status === 'running'
+                ? 'Searching for prospects...'
+                : 'No prospects found'
+            }
+          />
+        </TabsContent>
+
+        <TabsContent value="emails" className="space-y-4 mt-4">
+          <EmailPreviewList
+            emails={emails}
+            loading={false}
+            variant="default"
+            defaultExpandFirst
+            emptyMessage={
+              execution.status === 'running' && prospects.length > 0
+                ? 'Generating emails...'
+                : 'No emails generated yet'
+            }
+          />
+        </TabsContent>
+
+        <TabsContent value="logs" className="mt-4">
+          <Card className="border-border/50">
+            <ScrollArea className="h-[400px]">
+              <div className="p-4 space-y-2">
+                {execution.progress_logs && execution.progress_logs.length > 0 ? (
+                  execution.progress_logs.map((log: any, index: number) => (
+                    <div key={index} className="flex items-start gap-2 text-sm p-2 rounded-lg hover:bg-muted/30 transition-colors">
+                      <Clock className="h-3 w-3 mt-1 text-muted-foreground flex-shrink-0" />
+                      <div className="flex-1">
+                        <p className="text-foreground">{log.message}</p>
+                        {log.timestamp && (
+                          <p className="text-xs text-muted-foreground">
+                            {new Date(log.timestamp).toLocaleTimeString()}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-muted-foreground text-center py-8">
+                    No logs yet...
+                  </p>
+                )}
+              </div>
+            </ScrollArea>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 };

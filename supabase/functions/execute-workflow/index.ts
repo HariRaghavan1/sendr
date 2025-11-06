@@ -1,11 +1,47 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.75.1';
+import {
+  ExecuteWorkflowSchema,
+  validateInput,
+  extractAuthToken,
+  checkRateLimit,
+} from '../_shared/schemas.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+// Helper function to calculate email quality score (0-100)
+function calculateEmailQuality(subject: string, body: string): number {
+  let score = 50; // Start at 50
+
+  // Subject line quality (0-30 points)
+  if (subject.length >= 30 && subject.length <= 60) score += 15; // Optimal length
+  else if (subject.length > 60) score -= 10; // Too long
+  if (!subject.match(/^(re:|fwd:)/i)) score += 5; // Not a reply/forward
+  if (subject.match(/\?/)) score += 5; // Has a question
+  if (!subject.match(/[!]{2,}/)) score += 5; // No excessive exclamation
+
+  // Body quality (0-50 points)
+  const wordCount = body.split(/\s+/).length;
+  if (wordCount >= 50 && wordCount <= 150) score += 20; // Optimal length
+  else if (wordCount < 30) score -= 15; // Too short
+  else if (wordCount > 200) score -= 10; // Too long
+
+  // Check for personalization
+  if (body.match(/\{|\[/)) score += 10; // Has personalization variables
+
+  // Check for call-to-action
+  if (body.match(/(schedule|call|meeting|demo|chat)/i)) score += 10;
+
+  // Penalize spammy words
+  if (body.match(/(guaranteed|free|act now|limited time)/i)) score -= 15;
+
+  // Ensure score is between 0-100
+  return Math.max(0, Math.min(100, score));
+}
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -13,21 +49,51 @@ serve(async (req) => {
   }
 
   try {
-    const authHeader = req.headers.get('Authorization')!;
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    
+    // Validate environment variables
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+
+    if (!supabaseUrl || !supabaseKey) {
+      throw new Error('Missing required environment variables');
+    }
+
+    // Extract and validate auth token
+    const token = extractAuthToken(req.headers);
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     // Get user from auth header
-    const token = authHeader.replace('Bearer ', '');
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-    
+
     if (authError || !user) {
-      throw new Error('Unauthorized');
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
-    const { workflow_id, execution_id } = await req.json();
+    // Rate limiting: 10 workflow executions per minute per user
+    const rateLimitResult = checkRateLimit(`workflow:${user.id}`, 10, 60000);
+    if (!rateLimitResult.allowed) {
+      return new Response(
+        JSON.stringify({
+          error: 'Rate limit exceeded',
+          resetAt: new Date(rateLimitResult.resetAt).toISOString(),
+        }),
+        {
+          status: 429,
+          headers: {
+            ...corsHeaders,
+            'Content-Type': 'application/json',
+            'X-RateLimit-Remaining': '0',
+            'X-RateLimit-Reset': rateLimitResult.resetAt.toString(),
+          },
+        }
+      );
+    }
+
+    // Parse and validate request body
+    const requestBody = await req.json();
+    const { workflow_id, execution_id } = validateInput(ExecuteWorkflowSchema, requestBody);
 
     console.log('Starting workflow execution:', { workflow_id, execution_id });
 
@@ -50,79 +116,234 @@ serve(async (req) => {
     const instructions = workflow.instructions || '';
 
     // Start log
-    await updateExecutionLog(supabase, execution_id, '🚀 Test run started');
+    await updateExecutionLog(supabase, execution_id, '[1/3] 🚀 Test run started - Initializing...');
 
     // Get user's API keys
-    await updateExecutionLog(supabase, execution_id, '🔑 Checking API configuration...');
-    
+    await updateExecutionLog(supabase, execution_id, '[1/3] 🔑 Checking API configuration...');
+
     const { data: settings } = await supabase
       .from('user_settings')
-      .select('clado_api_key, openai_api_key')
+      .select('clado_api_key')
       .eq('user_id', user.id)
       .single();
 
-    if (!settings?.clado_api_key || !settings?.openai_api_key) {
-      const missing = [];
-      if (!settings?.clado_api_key) missing.push('Clado API key');
-      if (!settings?.openai_api_key) missing.push('OpenAI API key');
-      
-      const errorMsg = `Missing: ${missing.join(', ')}. Please configure in Settings.`;
+    // OpenAI key is stored as edge function secret, not in user settings
+    const openaiApiKey = Deno.env.get('OPENAI_API_KEY');
+
+    if (!settings?.clado_api_key) {
+      const errorMsg = 'Missing: Clado API key. Please configure in Settings.';
       await updateExecutionLog(supabase, execution_id, `❌ ${errorMsg}`);
       await failExecution(supabase, execution_id, errorMsg);
-      
+
       return new Response(
         JSON.stringify({ execution_id, message: errorMsg }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
-    
-    await updateExecutionLog(supabase, execution_id, '✅ API keys validated');
+
+    if (!openaiApiKey) {
+      const errorMsg = 'OpenAI API key not configured in edge function secrets.';
+      await updateExecutionLog(supabase, execution_id, `❌ ${errorMsg}`);
+      await failExecution(supabase, execution_id, errorMsg);
+
+      return new Response(
+        JSON.stringify({ execution_id, message: errorMsg }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    await updateExecutionLog(supabase, execution_id, '[1/3] ✅ API keys validated');
 
     // Find prospects (limit to 5 for test runs)
-    await updateExecutionLog(supabase, execution_id, '🔍 Searching for prospects via Clado API...');
+    await updateExecutionLog(supabase, execution_id, '[2/3] 🔍 Clado: Searching for prospects...');
     console.log('Calling Clado with criteria:', targetCriteria);
-    
+
     let prospects: any[] = [];
     try {
-      const cladoResponse = await fetch('https://api.clado.ai/v1/search', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${settings.clado_api_key}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
+      // Helper function to build query from criteria
+      const buildQuery = (criteria: any) => {
+        const queryParts: string[] = [];
+
+        if (criteria.job_titles) {
+          // Handle array of job titles
+          const titles = Array.isArray(criteria.job_titles)
+            ? criteria.job_titles.join(' or ')
+            : criteria.job_titles;
+          queryParts.push(titles);
+        }
+        if (criteria.industry) {
+          queryParts.push(`in ${criteria.industry}`);
+        }
+        if (criteria.location) {
+          queryParts.push(`located in ${criteria.location}`);
+        }
+        if (criteria.company_size) {
+          queryParts.push(`at ${criteria.company_size} companies`);
+        }
+
+        return queryParts.join(' ') || 'professionals';
+      };
+
+      // Helper function to try Clado search
+      const trySearch = async (query: string, attemptDescription: string) => {
+        console.log(`${attemptDescription}: "${query}"`);
+        await updateExecutionLog(supabase, execution_id, `[2/3] 🔍 Trying: ${query}`);
+
+        const cladoApiUrl = new URL('https://search.clado.ai/api/search');
+        cladoApiUrl.searchParams.append('query', query);
+        cladoApiUrl.searchParams.append('limit', '5');
+
+        const cladoResponse = await fetch(cladoApiUrl.toString(), {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${settings.clado_api_key}`,
+          },
+        });
+
+        console.log(`Clado response status (${attemptDescription}):`, cladoResponse.status);
+
+        if (!cladoResponse.ok) {
+          const errorText = await cladoResponse.text();
+          console.error('Clado error response:', errorText);
+          throw new Error(`Clado API returned ${cladoResponse.status}: ${errorText}`);
+        }
+
+        const cladoData = await cladoResponse.json();
+        return (cladoData.results || []).map((result: any) => {
+          const profile = result.profile || {};
+          const experience = result.experience?.[0] || {};
+
+          return {
+            id: profile.id || crypto.randomUUID(),
+            name: profile.name || 'Unknown',
+            email: '', // Email enrichment happens separately via Enrichment API
+            title: experience.title || profile.headline || '',
+            company: experience.company_name || '',
+            linkedin_url: profile.linkedin_url || '',
+          };
+        });
+      };
+
+      // Progressive fallback strategy - try increasingly broader queries
+      const searchStrategies = [
+        {
           criteria: targetCriteria,
-          limit: 5,
-        }),
-      });
+          description: 'Full criteria'
+        },
+        {
+          criteria: {
+            job_titles: targetCriteria.job_titles,
+            industry: targetCriteria.industry,
+            location: targetCriteria.location
+          },
+          description: 'Without company size'
+        },
+        {
+          criteria: {
+            job_titles: targetCriteria.job_titles,
+            industry: targetCriteria.industry
+          },
+          description: 'Job titles + industry only'
+        },
+        {
+          criteria: {
+            job_titles: targetCriteria.job_titles
+          },
+          description: 'Job titles only'
+        },
+        {
+          criteria: {
+            industry: targetCriteria.industry
+          },
+          description: 'Industry only (broadest)'
+        }
+      ];
 
-      console.log('Clado response status:', cladoResponse.status);
+      // Try each strategy until we get results
+      for (const strategy of searchStrategies) {
+        const query = buildQuery(strategy.criteria);
 
-      if (!cladoResponse.ok) {
-        const errorText = await cladoResponse.text();
-        console.error('Clado error response:', errorText);
-        throw new Error(`Clado API returned ${cladoResponse.status}: ${errorText}`);
+        // Skip if query is empty or same as previous
+        if (!query || query === 'professionals') continue;
+
+        try {
+          prospects = await trySearch(query, strategy.description);
+
+          if (prospects.length > 0) {
+            console.log(`✓ Found ${prospects.length} prospects using: ${strategy.description}`);
+            await updateExecutionLog(
+              supabase,
+              execution_id,
+              `[2/3] ✅ Clado: Found ${prospects.length} prospects (${strategy.description})`
+            );
+
+            // Store structured prospect data for UI
+            for (let i = 0; i < prospects.length; i++) {
+              const prospectData = {
+                id: prospects[i].id,
+                name: prospects[i].name,
+                title: prospects[i].title,
+                company: prospects[i].company,
+                linkedin_url: prospects[i].linkedin_url,
+                found_at: new Date().toISOString(),
+                index: i
+              };
+
+              // Add to prospects_data array
+              await supabase.rpc('add_prospect_to_execution', {
+                p_execution_id: execution_id,
+                p_prospect: prospectData
+              });
+
+              // Log individual prospect found (for real-time UI updates)
+              await updateExecutionLog(
+                supabase,
+                execution_id,
+                JSON.stringify({
+                  type: 'prospect_found',
+                  data: prospectData
+                })
+              );
+            }
+
+            break;
+          } else {
+            console.log(`✗ No results for: ${strategy.description}, trying broader search...`);
+          }
+        } catch (err) {
+          // If this strategy fails, try the next one
+          console.error(`Search failed for ${strategy.description}:`, err);
+          if (strategy === searchStrategies[searchStrategies.length - 1]) {
+            throw err; // Re-throw on last attempt
+          }
+        }
       }
 
-      const cladoData = await cladoResponse.json();
-      prospects = (cladoData.results || []).map((result: any) => ({
-        id: crypto.randomUUID(),
-        name: result.name || 'Unknown',
-        email: result.email || '',
-        title: result.title || '',
-        company: result.company || '',
-        linkedin_url: result.linkedin_url || '',
-      }));
-      
-      await updateExecutionLog(supabase, execution_id, `✅ Found ${prospects.length} prospects from Clado`);
-      console.log(`Retrieved ${prospects.length} prospects`);
+      if (prospects.length === 0) {
+        await updateExecutionLog(supabase, execution_id, '[2/3] ⚠️ No prospects found after trying all search strategies');
+      }
+
+      console.log(`Final result: Retrieved ${prospects.length} prospects`);
       
     } catch (error: any) {
-      const errorMsg = `Clado API error: ${error.message}`;
+      let errorMsg = `Clado API error: ${error.message}`;
+
+      // Provide helpful guidance for common errors
+      if (error.message.includes('401') || error.message.includes('Unauthorized')) {
+        errorMsg = `Clado API Authentication Error - Your API key is invalid or expired. Please check:\n` +
+                   `1. API key starts with 'lk_'\n` +
+                   `2. Key is valid at https://www.clado.ai/dashboard\n` +
+                   `3. Update key in Settings if needed`;
+      } else if (error.message.includes('403') || error.message.includes('Forbidden')) {
+        errorMsg = `Clado API Access Error - Your account may not have access to this feature or has insufficient credits`;
+      } else if (error.message.includes('429') || error.message.includes('Too Many Requests')) {
+        errorMsg = `Clado API Rate Limit - You've exceeded the rate limit. Please wait and try again`;
+      }
+
       console.error('Clado fetch failed:', error);
       await updateExecutionLog(supabase, execution_id, `❌ ${errorMsg}`);
       await failExecution(supabase, execution_id, errorMsg);
-      
+
       return new Response(
         JSON.stringify({ execution_id, message: errorMsg }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -144,7 +365,7 @@ serve(async (req) => {
       .update({ total_prospects: prospects.length, prospects_found: prospects.length })
       .eq('id', execution_id);
 
-    await updateExecutionLog(supabase, execution_id, `📧 Starting email generation for ${prospects.length} prospects...`);
+    await updateExecutionLog(supabase, execution_id, `[3/3] 📧 OpenAI: Generating emails for ${prospects.length} prospects...`);
 
     // Process each prospect
     let successCount = 0;
@@ -152,12 +373,12 @@ serve(async (req) => {
 
         for (let i = 0; i < prospects.length; i++) {
           const prospect = prospects[i];
-          
+
           try {
             await updateExecutionLog(
-              supabase, 
-              execution_id, 
-              `🤖 Generating email ${i + 1}/${prospects.length} for ${prospect.name}...`
+              supabase,
+              execution_id,
+              `[3/3] 🤖 OpenAI: Generating email ${i + 1}/${prospects.length} for ${prospect.name}...`
             );
             
             console.log(`Processing prospect ${i + 1}: ${prospect.name}`);
@@ -188,7 +409,7 @@ serve(async (req) => {
             const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
               method: 'POST',
               headers: {
-                'Authorization': `Bearer ${settings.openai_api_key}`,
+                'Authorization': `Bearer ${openaiApiKey}`,
                 'Content-Type': 'application/json',
               },
               body: JSON.stringify({
@@ -233,11 +454,39 @@ serve(async (req) => {
 
             // For test runs, we DON'T save to database or send
             await updateExecutionLog(
-              supabase, 
-              execution_id, 
-              `✅ Generated email ${i + 1}/${prospects.length}\n📧 To: ${prospect.email}\n📝 Subject: ${subject}\n(Test mode - not sent)`
+              supabase,
+              execution_id,
+              `[3/3] ✅ OpenAI: Generated email ${i + 1}/${prospects.length}\n📧 To: ${prospect.email}\n📝 Subject: ${subject}\n(Test mode - not sent)`
             );
-            
+
+            // Store structured email data for UI
+            const emailData = {
+              prospect_id: prospect.id,
+              prospect_name: prospect.name,
+              subject: subject,
+              body: body,
+              generated_at: new Date().toISOString(),
+              index: i,
+              word_count: body.split(/\s+/).length,
+              quality_score: calculateEmailQuality(subject, body)
+            };
+
+            // Add to emails_data array
+            await supabase.rpc('add_email_to_execution', {
+              p_execution_id: execution_id,
+              p_email: emailData
+            });
+
+            // Log individual email generated (for real-time UI updates)
+            await updateExecutionLog(
+              supabase,
+              execution_id,
+              JSON.stringify({
+                type: 'email_generated',
+                data: emailData
+              })
+            );
+
             console.log(`Successfully generated email for ${prospect.name}`);
             successCount++;
 

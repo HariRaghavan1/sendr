@@ -29,6 +29,10 @@ const ConversationView = () => {
   }, [conversationId]);
 
   useEffect(() => {
+    setCurrentConvId(conversationId);
+  }, [conversationId]);
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
@@ -65,16 +69,19 @@ const ConversationView = () => {
 
       // Stream response from edge function
       const session = await supabase.auth.getSession();
-      
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+
       const response = await fetch(
-        `https://tbbyxprlgrsrzvxvkpgz.supabase.co/functions/v1/campaign-chat`,
+        `${supabaseUrl}/functions/v1/campaign-chat`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${session.data.session?.access_token}`,
           },
-          body: JSON.stringify({ messages: newMessages }),
+          body: JSON.stringify({
+            messages: newMessages.filter(msg => msg.content != null && msg.content !== '')
+          }),
         }
       );
 
@@ -174,6 +181,42 @@ let accumulatedToolCalls: Map<number, any> = new Map();
               const { data: { user } } = await supabase.auth.getUser();
               if (!user) throw new Error('Not authenticated');
 
+              // Create a workflow (needed for the WorkflowCard and test runs)
+              const workflowData = {
+                name: config.name,
+                description: `Campaign: ${config.name}`,
+                target_criteria: config.target_criteria,
+                tone: config.tone,
+                goal: config.goal,
+                instructions: config.custom_prompt || '',
+                schedule: { frequency: 'daily', time: '09:00', batch_size: 25 },
+                steps: [
+                  { action: 'find_prospects', description: 'Find prospects matching criteria' },
+                  { action: 'generate_email', description: 'Generate personalized emails' },
+                  { action: 'send_email', description: 'Send emails to prospects' }
+                ]
+              };
+
+              const { data: workflow, error: workflowError } = await supabase
+                .from('workflows')
+                .insert({
+                  user_id: user.id,
+                  conversation_id: convId,
+                  name: config.name,
+                  description: workflowData.description,
+                  workflow_config: workflowData,
+                  instructions: config.custom_prompt || '',
+                  schedule_config: workflowData.schedule,
+                  status: 'draft'
+                })
+                .select()
+                .single();
+
+              if (workflowError) throw workflowError;
+
+              workflowData.id = workflow.id;
+
+              // Create the campaign
               const { data: campaign, error: campaignError } = await supabase
                 .from('campaigns')
                 .insert({
@@ -197,14 +240,27 @@ let accumulatedToolCalls: Map<number, any> = new Map();
                   .eq('id', convId);
               }
 
-finalAssistantContent = `Created campaign "${config.name}".`;
+              // Set message metadata to display WorkflowCard
+              setMessages(prev => {
+                const updated = [...prev];
+                updated[assistantMessageIndex] = {
+                  ...updated[assistantMessageIndex],
+                  metadata: {
+                    type: 'workflow',
+                    workflowId: workflow.id,
+                    workflowData
+                  }
+                };
+                return updated;
+              });
 
-toast({
-  title: "Campaign created!",
-  description: `"${config.name}" has been created successfully.`,
-});
+              toast({
+                title: "Campaign created!",
+                description: `"${config.name}" is ready. Click "Test Run" to test it.`,
+              });
 
-setTimeout(() => navigate(`/campaigns/${campaign.id}`), 2000);
+              finalAssistantContent = `Created campaign "${config.name}". Click "Test Run" below to test it with a small batch.`;
+
             } catch (error: any) {
               console.error('Error creating campaign:', error);
               toast({
@@ -281,14 +337,12 @@ try {
         .eq('id', convId);
     }
 
-    finalAssistantContent = `Created campaign "${workflowData.name}".`;
-
     toast({
       title: 'Campaign created!',
-      description: `"${workflowData.name}" has been created from the workflow.`,
+      description: `"${workflowData.name}" is ready. Click "Test Run" to test it.`,
     });
 
-    setTimeout(() => navigate(`/campaigns/${campaign.id}`), 2000);
+    finalAssistantContent = `Created campaign "${workflowData.name}". Click "Test Run" below to test it with a small batch.`;
   }
 } catch (e) {
   console.error('Auto-create campaign error:', e);
@@ -368,7 +422,7 @@ try {
       {/* Messages */}
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
-          {messages.map((message, index) => (
+          {messages.filter(msg => msg && msg.role).map((message, index) => (
             <div
               key={index}
               className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
@@ -443,9 +497,17 @@ try {
                         }).then(({ error }) => {
                           if (error) {
                             console.error('Error executing workflow:', error);
+
+                            // Check if error is due to function not being deployed
+                            const isDeploymentError = error.message?.includes('404') ||
+                                                     error.message?.includes('not found') ||
+                                                     error.message?.includes('FunctionsRelayError');
+
                             toast({
-                              title: "Execution Error",
-                              description: error.message,
+                              title: isDeploymentError ? "Edge Function Not Deployed" : "Execution Error",
+                              description: isDeploymentError
+                                ? "The execute-workflow function hasn't been deployed to Supabase. Please deploy it using: supabase functions deploy execute-workflow"
+                                : error.message,
                               variant: "destructive",
                             });
                           }
@@ -505,10 +567,8 @@ try {
 
                         toast({
                           title: "Campaign deployed!",
-                          description: `"${workflowData.name}" is now active.`,
+                          description: `"${workflowData.name}" is now active. View it in your campaigns list.`,
                         });
-
-                        setTimeout(() => navigate(`/campaigns/${campaign.id}`), 1500);
                       } catch (error: any) {
                         console.error('Error deploying workflow:', error);
                         toast({

@@ -13,6 +13,17 @@ export interface Message {
   };
 }
 
+/**
+ * Custom hook for managing campaign conversation state and persistence
+ *
+ * @param conversationId - Optional ID of an existing conversation to load
+ * @returns Object containing conversation state and methods
+ *
+ * @example
+ * ```tsx
+ * const { messages, createConversation, saveMessage } = useConversation();
+ * ```
+ */
 export const useConversation = (conversationId?: string) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [title, setTitle] = useState<string>('');
@@ -21,6 +32,10 @@ export const useConversation = (conversationId?: string) => {
   useEffect(() => {
     if (conversationId) {
       loadConversation(conversationId);
+    } else {
+      // Reset state for new conversation
+      setMessages([]);
+      setTitle('');
     }
   }, [conversationId]);
 
@@ -46,7 +61,15 @@ export const useConversation = (conversationId?: string) => {
         .order('created_at', { ascending: true });
 
       if (msgs) {
-        setMessages(msgs as Message[]);
+        // Map database records to Message interface, filtering out invalid messages
+        const mappedMessages: Message[] = msgs
+          .filter(msg => msg.role && msg.content != null && msg.content !== '')
+          .map(msg => ({
+            role: msg.role as 'user' | 'assistant' | 'system',
+            content: msg.content,
+            metadata: msg.metadata as Message['metadata']
+          }));
+        setMessages(mappedMessages);
       }
     } catch (error) {
       console.error('Error loading conversation:', error);
@@ -55,6 +78,14 @@ export const useConversation = (conversationId?: string) => {
     }
   };
 
+  /**
+   * Creates a new conversation in the database
+   *
+   * @param firstMessage - The first user message to generate a title from
+   * @param campaignId - Optional campaign ID to associate with this conversation
+   * @returns The ID of the newly created conversation
+   * @throws Error if user is not authenticated or database operation fails
+   */
   const createConversation = async (firstMessage: string, campaignId?: string) => {
     try {
       const { data: user } = await supabase.auth.getUser();
@@ -83,9 +114,18 @@ export const useConversation = (conversationId?: string) => {
     }
   };
 
+  /**
+   * Saves a message to the database and updates local state
+   *
+   * @param conversationId - The conversation to add the message to
+   * @param role - The role of the message sender ('user' or 'assistant')
+   * @param content - The message content
+   * @param metadata - Optional metadata about workflow, campaign, or execution
+   * @throws Error if database operation fails
+   */
   const saveMessage = async (
-    conversationId: string, 
-    role: 'user' | 'assistant', 
+    conversationId: string,
+    role: 'user' | 'assistant',
     content: string,
     metadata?: Message['metadata']
   ) => {

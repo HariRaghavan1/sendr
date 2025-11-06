@@ -36,15 +36,30 @@ export default function Settings() {
       .from("user_settings")
       .select("*")
       .eq("user_id", user.id)
-      .single();
+      .maybeSingle();
 
     if (error) {
       console.error("Error loading settings:", error);
+      toast.error("Failed to load settings");
     } else if (data) {
       setSettings({
         clado_api_key: data.clado_api_key || "",
         composio_api_key: data.composio_api_key || "",
       });
+    } else {
+      // No settings row exists yet - create one
+      const { error: insertError } = await supabase
+        .from("user_settings")
+        .insert({
+          user_id: user.id,
+          clado_api_key: "",
+          composio_api_key: "",
+        });
+
+      if (insertError) {
+        console.error("Error creating settings:", insertError);
+        toast.error("Failed to initialize settings");
+      }
     }
     setLoading(false);
   };
@@ -52,14 +67,23 @@ export default function Settings() {
   const handleSave = async () => {
     setSaving(true);
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!user) {
+      toast.error("You must be logged in to save settings");
+      setSaving(false);
+      return;
+    }
 
     const { error } = await supabase
       .from("user_settings")
-      .update(settings)
-      .eq("user_id", user.id);
+      .upsert({
+        user_id: user.id,
+        ...settings,
+      }, {
+        onConflict: 'user_id'
+      });
 
     if (error) {
+      console.error("Error saving settings:", error);
       toast.error("Failed to save settings");
     } else {
       toast.success("Settings saved successfully");
@@ -130,6 +154,7 @@ export default function Settings() {
                   variant="ghost"
                   size="icon"
                   onClick={() => toggleVisibility("clado_api_key")}
+                  aria-label={visibility.clado_api_key ? "Hide Clado API key" : "Show Clado API key"}
                 >
                   {visibility.clado_api_key ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </Button>
@@ -163,6 +188,7 @@ export default function Settings() {
                   variant="ghost"
                   size="icon"
                   onClick={() => toggleVisibility("composio_api_key")}
+                  aria-label={visibility.composio_api_key ? "Hide Composio API key" : "Show Composio API key"}
                 >
                   {visibility.composio_api_key ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </Button>
@@ -170,6 +196,12 @@ export default function Settings() {
               <p className="text-xs text-muted-foreground">
                 Used for email sending via Gmail/Outlook. Get your key at <a href="https://app.composio.dev" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">app.composio.dev</a>
               </p>
+              <div className="mt-2 p-3 rounded-lg bg-muted/50 border border-border">
+                <p className="text-xs font-medium mb-1">📧 Gmail Connection Required</p>
+                <p className="text-xs text-muted-foreground">
+                  After saving your Composio API key, visit <a href="https://app.composio.dev" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline font-medium">app.composio.dev</a> to connect your Gmail account. This allows Bork to send emails on your behalf.
+                </p>
+              </div>
             </div>
 
             <div className="pt-4">

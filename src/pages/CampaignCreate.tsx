@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,6 +10,22 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
+
+type EmailTone = Database['public']['Enums']['email_tone'];
+type EmailGoal = Database['public']['Enums']['email_goal'];
+type CampaignStatus = Database['public']['Enums']['campaign_status'];
+
+interface TargetCriteria {
+  industry: string;
+  location: string;
+  job_titles: string;
+}
+
+interface FrequencyConfig {
+  type: string;
+  time: string;
+  batch_size: number;
+}
 
 export default function CampaignCreate() {
   const navigate = useNavigate();
@@ -19,9 +36,9 @@ export default function CampaignCreate() {
       industry: "",
       location: "",
       job_titles: "",
-    },
-    tone: "casual",
-    goal: "meeting",
+    } as TargetCriteria,
+    tone: "casual" as EmailTone,
+    goal: "meeting" as EmailGoal,
     custom_prompt: "",
     frequency_type: "daily",
     frequency_time: "09:00",
@@ -39,21 +56,23 @@ export default function CampaignCreate() {
       return;
     }
 
-    const { data, error } = await supabase
+    const frequencyConfig: FrequencyConfig = {
+      type: formData.frequency_type,
+      time: formData.frequency_time,
+      batch_size: formData.batch_size,
+    };
+
+    const { data, error} = await supabase
       .from("campaigns")
       .insert([{
         user_id: user.id,
         name: formData.name,
-        target_criteria: formData.target_criteria as any,
-        tone: formData.tone as any,
-        goal: formData.goal as any,
+        target_criteria: formData.target_criteria,
+        tone: formData.tone,
+        goal: formData.goal,
         custom_prompt: formData.custom_prompt,
-        frequency_config: {
-          type: formData.frequency_type,
-          time: formData.frequency_time,
-          batch_size: formData.batch_size,
-        } as any,
-        status: "draft" as any,
+        frequency_config: frequencyConfig,
+        status: "draft" as CampaignStatus,
       }])
       .select()
       .single();

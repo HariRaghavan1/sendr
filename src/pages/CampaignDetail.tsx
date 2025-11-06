@@ -4,7 +4,17 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Play, Pause, Trash2, Mail, Eye, MessageSquare, TrendingUp, TestTube } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Play, Pause, Trash2, Mail, Eye, MessageSquare, TrendingUp, TestTube, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { TestRunDialog } from "@/components/TestRunDialog";
 import {
@@ -23,6 +33,7 @@ export default function CampaignDetail() {
   const [prospects, setProspects] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [testDialogOpen, setTestDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   useEffect(() => {
     loadCampaign();
@@ -73,10 +84,6 @@ export default function CampaignDetail() {
   };
 
   const deleteCampaign = async () => {
-    if (!confirm("Are you sure you want to delete this campaign? This cannot be undone.")) {
-      return;
-    }
-
     const { error } = await supabase
       .from("campaigns")
       .delete()
@@ -85,9 +92,10 @@ export default function CampaignDetail() {
     if (error) {
       toast.error("Failed to delete campaign");
     } else {
-      toast.success("Campaign deleted");
+      toast.success("Campaign deleted successfully");
       navigate("/dashboard");
     }
+    setDeleteDialogOpen(false);
   };
 
   if (loading) {
@@ -107,7 +115,7 @@ export default function CampaignDetail() {
   return (
     <div className="flex-1 p-8 overflow-auto">
       <div className="max-w-7xl mx-auto space-y-6">
-        <div className="flex items-start justify-between">
+        <div className="flex flex-col lg:flex-row items-start justify-between gap-4">
           <div>
             <div className="flex items-center gap-3 mb-2">
               <h1 className="text-3xl font-bold tracking-tight">{campaign.name}</h1>
@@ -125,12 +133,28 @@ export default function CampaignDetail() {
               {campaign.tone} tone • {campaign.goal} goal
             </p>
           </div>
-          <div className="flex gap-2">
-            <Button onClick={() => setTestDialogOpen(true)} variant="secondary">
+          <div className="flex flex-wrap gap-2">
+            <Button
+              onClick={() => setTestDialogOpen(true)}
+              variant="secondary"
+              aria-label="Run test campaign"
+            >
               <TestTube className="mr-2 h-4 w-4" />
               Test Run
             </Button>
-            <Button variant="outline" onClick={toggleStatus}>
+            <Button
+              variant="outline"
+              onClick={() => navigate(`/campaigns/${id}/edit`)}
+              aria-label="Edit campaign"
+            >
+              <Pencil className="mr-2 h-4 w-4" />
+              Edit
+            </Button>
+            <Button
+              variant="outline"
+              onClick={toggleStatus}
+              aria-label={campaign.status === "active" ? "Pause campaign" : "Activate campaign"}
+            >
               {campaign.status === "active" ? (
                 <>
                   <Pause className="mr-2 h-4 w-4" />
@@ -143,7 +167,11 @@ export default function CampaignDetail() {
                 </>
               )}
             </Button>
-            <Button variant="destructive" onClick={deleteCampaign}>
+            <Button
+              variant="destructive"
+              onClick={() => setDeleteDialogOpen(true)}
+              aria-label="Delete campaign"
+            >
               <Trash2 className="mr-2 h-4 w-4" />
               Delete
             </Button>
@@ -274,11 +302,32 @@ export default function CampaignDetail() {
         </Card>
       </div>
 
-      <TestRunDialog 
+      <TestRunDialog
         open={testDialogOpen}
         onOpenChange={setTestDialogOpen}
         campaignId={id!}
       />
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Campaign?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete "{campaign?.name}"? This action cannot be undone.
+              All prospects and execution history will be permanently removed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={deleteCampaign}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete Campaign
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
