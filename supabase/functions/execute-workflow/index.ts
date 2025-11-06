@@ -30,7 +30,7 @@ serve(async (req) => {
     } = await import('../_shared/schemas.ts');
     const { searchCladoProspects, checkCladoCredits } = await import('../_shared/clado-helpers.ts');
     const { STANDARD_EMAIL_TEMPLATE } = await import('../_shared/email-template.ts');
-    // Removed hardcoded prospects import for privacy
+    const { FALLBACK_PROSPECTS, getFallbackProspects } = await import('../_shared/mock-prospects.ts');
 
     // Helper function to calculate email quality score (0-100)
     /**
@@ -1075,7 +1075,21 @@ serve(async (req) => {
 
     if (prospects.length === 0) {
       await updateExecutionLog(supabase, execution_id, `⚠️ No prospects found through Clado search.`);
-      await updateExecutionLog(supabase, execution_id, `[2/3] ⚠️ No prospects found. Please try broadening your search criteria.`);
+      await updateExecutionLog(supabase, execution_id, `[2/3] 🎬 No Clado results found - using demo prospects...`);
+      
+      // Use hardcoded fallback prospects
+      const fallbackProspects = getFallbackProspects(limit);
+      prospects = fallbackProspects.map((p, idx) => ({
+        id: p.id,
+        name: p.name,
+        email: p.email,
+        title: p.title,
+        company: p.company,
+        linkedin_url: p.linkedin_url,
+      }));
+      
+      await updateExecutionLog(supabase, execution_id, `[2/3] ✅ Demo: Found ${prospects.length} prospects for test run`);
+      console.log(`✅ Fallback prospects set: ${prospects.length} prospects`);
     }
 
     for (let i = 0; i < prospects.length; i++) {
