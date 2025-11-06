@@ -40,18 +40,17 @@ const ConversationView = () => {
 
   // Real-time subscription for new messages
   useEffect(() => {
-    const currentConvId = conversationId || id;
-    if (!currentConvId) return;
+    if (!conversationId) return;
 
     const channel = supabase
-      .channel(`messages-${currentConvId}`)
+      .channel(`messages-${conversationId}`)
       .on(
         'postgres_changes',
         {
           event: 'INSERT',
           schema: 'public',
           table: 'conversation_messages',
-          filter: `conversation_id=eq.${currentConvId}`
+          filter: `conversation_id=eq.${conversationId}`
         },
         (payload) => {
           const newMessage = payload.new as any;
@@ -73,7 +72,7 @@ const ConversationView = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [conversationId, id]);
+  }, [conversationId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

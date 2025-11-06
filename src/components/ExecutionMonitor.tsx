@@ -1,10 +1,11 @@
 import { useRealtimeExecution } from '@/hooks/useRealtimeExecution';
+import { cn } from '@/lib/utils';
 import { Progress } from './ui/progress';
 import { Badge } from './ui/badge';
 import { ScrollArea } from './ui/scroll-area';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-import { CheckCircle2, XCircle, Loader2, Clock, Search, Sparkles, Mail, TrendingUp, Users, Zap } from 'lucide-react';
+import { CheckCircle2, XCircle, Loader2, Search, Sparkles, Mail, TrendingUp, Users, Zap, Send, AlertCircle, Info } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { ProspectGrid, type Prospect } from './ProspectCard';
 import { EmailPreviewList, type EmailData } from './EmailPreviewCard';
