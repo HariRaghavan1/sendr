@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -18,11 +18,16 @@ const CampaignAICreate = () => {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'assistant',
-      content: "Hi! I'll help you create a campaign. Just describe what you want in natural language.\n\nFor example:\n• \"Create a workflow that finds professors and sends them emails\"\n• \"Reach out to CTOs at tech startups in San Francisco\"\n• \"Find marketing directors at Fortune 500 companies\""
+      content: "Hi! I'm here to help you create an email outreach campaign. What kind of campaign would you like to create?"
     }
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,62 +35,130 @@ const CampaignAICreate = () => {
 
     const userMessage = input.trim();
     setInput('');
-    setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
+    const newMessages = [...messages, { role: 'user' as const, content: userMessage }];
+    setMessages(newMessages);
     setLoading(true);
 
     try {
-      // Parse intent with AI
-      const { data: parseData, error: parseError } = await supabase.functions.invoke('parse-campaign-intent', {
-        body: { message: userMessage }
-      });
+      const response = await fetch(
+        `https://tbbyxprlgrsrzvxvkpgz.supabase.co/functions/v1/campaign-chat`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
+          },
+          body: JSON.stringify({ messages: newMessages }),
+        }
+      );
 
-      if (parseError) throw parseError;
+      if (!response.ok || !response.body) throw new Error('Failed to get response');
 
-      console.log('Parsed campaign config:', parseData);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let assistantMessage = '';
+      let buffer = '';
+      let toolCalls: any[] = [];
 
-      // Create campaign
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
+      setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
 
-      const { data: campaign, error: campaignError } = await supabase
-        .from('campaigns')
-        .insert({
-          user_id: user.id,
-          name: parseData.name,
-          target_criteria: parseData.target_criteria,
-          tone: parseData.tone || 'casual',
-          goal: parseData.goal || 'meeting',
-          custom_prompt: parseData.custom_prompt,
-          status: 'draft'
-        })
-        .select()
-        .single();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-      if (campaignError) throw campaignError;
+        buffer += decoder.decode(value, { stream: true });
+        let newlineIndex: number;
 
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: `Perfect! I've created your campaign "${parseData.name}".\n\nTarget: ${JSON.stringify(parseData.target_criteria, null, 2)}\nTone: ${parseData.tone || 'casual'}\nGoal: ${parseData.goal || 'meeting'}\n\nYou can now activate it from the dashboard!`
-      }]);
+        while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
+          let line = buffer.slice(0, newlineIndex);
+          buffer = buffer.slice(newlineIndex + 1);
 
-      toast({
-        title: "Campaign created!",
-        description: `"${parseData.name}" is ready to use.`,
-      });
+          if (line.endsWith('\r')) line = line.slice(0, -1);
+          if (line.startsWith(':') || line.trim() === '') continue;
+          if (!line.startsWith('data: ')) continue;
 
-      setTimeout(() => {
-        navigate('/dashboard');
-      }, 2000);
+          const jsonStr = line.slice(6).trim();
+          if (jsonStr === '[DONE]') break;
+
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const delta = parsed.choices?.[0]?.delta;
+            
+            if (delta?.content) {
+              assistantMessage += delta.content;
+              setMessages(prev => {
+                const newMsgs = [...prev];
+                newMsgs[newMsgs.length - 1] = { role: 'assistant', content: assistantMessage };
+                return newMsgs;
+              });
+            }
+
+            if (delta?.tool_calls) {
+              toolCalls.push(...delta.tool_calls);
+            }
+          } catch {
+            buffer = line + '\n' + buffer;
+            break;
+          }
+        }
+      }
+
+      // Handle tool calls (campaign creation)
+      if (toolCalls.length > 0) {
+        const toolCall = toolCalls.find(tc => tc.function?.name === 'create_campaign');
+        if (toolCall?.function?.arguments) {
+          try {
+            const config = JSON.parse(toolCall.function.arguments);
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) throw new Error('Not authenticated');
+
+            const { data: campaign, error: campaignError } = await supabase
+              .from('campaigns')
+              .insert({
+                user_id: user.id,
+                name: config.name,
+                target_criteria: config.target_criteria,
+                tone: config.tone,
+                goal: config.goal,
+                custom_prompt: config.custom_prompt,
+                status: 'draft'
+              })
+              .select()
+              .single();
+
+            if (campaignError) throw campaignError;
+
+            setMessages(prev => [...prev, {
+              role: 'assistant',
+              content: `Perfect! I've created your campaign "${config.name}". Redirecting you to view it...`
+            }]);
+
+            toast({
+              title: "Campaign created!",
+              description: `"${config.name}" has been created successfully.`,
+            });
+
+            setTimeout(() => navigate(`/campaigns/${campaign.id}`), 1500);
+          } catch (error: any) {
+            console.error('Error creating campaign:', error);
+            toast({
+              title: "Error creating campaign",
+              description: error.message,
+              variant: "destructive",
+            });
+          }
+        }
+      }
 
     } catch (error: any) {
-      console.error('Error creating campaign:', error);
+      console.error('Error in chat:', error);
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: `Sorry, I encountered an error: ${error.message}. Please try rephrasing your request or use the manual form.`
+        content: 'Sorry, I encountered an error. Please try again or check that your OpenAI API key is configured in Settings.'
       }]);
       toast({
         title: "Error",
-        description: error.message,
+        description: error.message || "Failed to send message",
         variant: "destructive",
       });
     } finally {
@@ -135,6 +208,7 @@ const CampaignAICreate = () => {
                 </div>
               </div>
             )}
+            <div ref={messagesEndRef} />
           </div>
         </Card>
 
@@ -142,9 +216,15 @@ const CampaignAICreate = () => {
           <Textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Describe your campaign... (e.g., 'Find marketing directors at SaaS companies')"
+            placeholder="Tell me about your campaign..."
             className="min-h-[60px]"
             disabled={loading}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSubmit(e);
+              }
+            }}
           />
           <Button type="submit" size="icon" disabled={loading || !input.trim()}>
             <Send className="h-5 w-5" />
