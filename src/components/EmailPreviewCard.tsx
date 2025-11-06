@@ -78,6 +78,18 @@ export function EmailPreviewCard({
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
   const [copied, setCopied] = useState(false);
 
+  // Check for personalization opportunities
+  const suggestions: string[] = [];
+  if (email.body.split(' ').length > 150) {
+    suggestions.push('Consider shortening to under 120 words');
+  }
+  if (!email.body.includes('{first_name}')) {
+    suggestions.push('Add {first_name} personalization');
+  }
+  if (!email.body.includes('{company}')) {
+    suggestions.push('Add {company} personalization');
+  }
+
   const handleCopy = async (content: string, type: 'subject' | 'body' | 'full') => {
     try {
       const textToCopy = type === 'full'
@@ -275,6 +287,28 @@ export function EmailPreviewCard({
                 {highlightPersonalization(email.body)}
               </div>
             </div>
+
+            {/* AI-Powered Suggestions */}
+            {suggestions.length > 0 && isExpanded && (
+              <div className="mt-4 p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
+                <div className="flex items-start gap-2">
+                  <Sparkles className="h-4 w-4 text-blue-500 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-blue-700 dark:text-blue-300 mb-2">
+                      💡 AI Suggestions
+                    </p>
+                    <ul className="text-xs space-y-1 text-blue-600 dark:text-blue-400">
+                      {suggestions.map((suggestion, idx) => (
+                        <li key={idx} className="flex items-start gap-1">
+                          <span className="text-blue-500 mt-0.5">•</span>
+                          <span>{suggestion}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Send Error */}
             {email.send_error && (

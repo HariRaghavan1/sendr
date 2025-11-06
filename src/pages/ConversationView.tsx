@@ -38,6 +38,43 @@ const ConversationView = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Real-time subscription for new messages
+  useEffect(() => {
+    const currentConvId = conversationId || id;
+    if (!currentConvId) return;
+
+    const channel = supabase
+      .channel(`messages-${currentConvId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'conversation_messages',
+          filter: `conversation_id=eq.${currentConvId}`
+        },
+        (payload) => {
+          const newMessage = payload.new as any;
+          setMessages(prev => {
+            if (prev.some((m: any) => m.id === newMessage.id)) return prev;
+            return [...prev, newMessage];
+          });
+          
+          if (newMessage.metadata?.type === 'execution_complete') {
+            toast({
+              title: "Execution Complete",
+              description: `Found ${newMessage.metadata.stats?.prospects_found || 0} prospects, generated ${newMessage.metadata.stats?.emails_generated || 0} emails`,
+            });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [conversationId, id]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || loading) return;

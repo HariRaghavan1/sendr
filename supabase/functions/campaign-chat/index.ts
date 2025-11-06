@@ -170,6 +170,12 @@ Clado will automatically:
 If user asks about prospects without emails, suggest:
 "I'll enable email enrichment through Clado - this costs 4 credits per email found but significantly improves deliverability."
 
+PROACTIVE NOTIFICATIONS & UPDATES:
+After actions complete (test runs, email sends), provide conversational updates:
+- "Great news! Found 12 prospects matching your criteria. Want to review them?"
+- "All done! Generated 12 high-quality emails (avg score: 89/100). Ready to send?"
+- "Emails sent! 🎉 Your outreach to 12 CTOs in NYC is live."
+
 GMAIL CONNECTION (CRITICAL - READ THIS CAREFULLY):
 Before ANY email sending (skip_sending=false), you MUST ensure Gmail is connected:
 
@@ -532,6 +538,53 @@ Be direct and action-oriented. Don't ask unnecessary questions.`
                   }
                 },
                 required: ["campaign_id", "updates"]
+              }
+            }
+          },
+          {
+            type: "function",
+            function: {
+              name: "edit_email",
+              description: "Edit or regenerate a specific email with custom instructions. Use when user wants to modify individual emails.",
+              parameters: {
+                type: "object",
+                properties: {
+                  prospect_name: {
+                    type: "string",
+                    description: "Name of the prospect (for context)"
+                  },
+                  instruction: {
+                    type: "string",
+                    description: "Specific editing instruction, e.g., 'make it more casual', 'add reference to their recent blog post', 'shorten to 80 words'"
+                  }
+                },
+                required: ["prospect_name", "instruction"]
+              }
+            }
+          },
+          {
+            type: "function",
+            function: {
+              name: "customize_batch",
+              description: "Apply custom instructions to next email generation batch. Use when user wants to modify how future emails are generated.",
+              parameters: {
+                type: "object",
+                properties: {
+                  workflow_id: {
+                    type: "string",
+                    description: "Workflow ID to customize"
+                  },
+                  instructions: {
+                    type: "string",
+                    description: "Custom instructions for email generation"
+                  },
+                  apply_to: {
+                    type: "string",
+                    enum: ["all", "remaining", "specific_titles"],
+                    description: "Scope of customization"
+                  }
+                },
+                required: ["workflow_id", "instructions", "apply_to"]
               }
             }
           },

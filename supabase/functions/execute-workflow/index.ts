@@ -125,6 +125,29 @@ serve(async (req) => {
     const config = workflow.workflow_config || {};
     const targetCriteria = config.target_criteria || {};
     const instructions = workflow.instructions || '';
+    
+    // Get conversation context and ID for chat notifications
+    let conversationContext: any[] = [];
+    let conversationId: string | null = null;
+    const campaignId = campaign_id || (config as any).campaign_id || null;
+    
+    if (campaignId) {
+      const { data: campaign } = await supabase
+        .from('campaigns')
+        .select('conversation_context')
+        .eq('id', campaignId)
+        .single();
+      
+      conversationContext = campaign?.conversation_context || [];
+      
+      // Get conversation ID
+      const { data: convData } = await supabase
+        .from('campaign_conversations')
+        .select('id')
+        .eq('campaign_id', campaignId)
+        .single();
+      conversationId = convData?.id || null;
+    }
 
     // Start log
     await updateExecutionLog(supabase, execution_id, `[1/3] 🚀 Test run started - ${limit} prospect${limit === 1 ? '' : 's'}, ${shouldSkipSending ? 'dry run (no sending)' : 'will send emails'}`);
@@ -519,9 +542,71 @@ serve(async (req) => {
             };
             const goalInstruction = goalMap[config.goal] || 'start a conversation';
 
-            const systemPrompt = `You are an expert cold email writer. Write personalized, compelling emails that feel human and conversational. \n\nGuidelines:\n- Keep it under 120 words\n- Use a ${toneInstruction} tone\n- Goal is to ${goalInstruction}\n- Create curiosity, don't hard sell\n- Focus on the prospect's role and potential pain points\n- End with a clear, low-pressure call to action`;
+            // Build conversation context summary
+            let contextSummary = '';
+            if (conversationContext.length > 0) {
+              const relevantMessages = conversationContext
+                .filter((msg: any) => msg.role === 'user' || (msg.role === 'assistant' && msg.content.length < 500))
+                .slice(-10);
+              contextSummary = `\n\nCAMPAIGN CONTEXT FROM CONVERSATION:\n${relevantMessages.map((m: any) => `${m.role}: ${m.content}`).join('\n')}\n`;
+            }
 
-            const userPrompt = `Write a cold email to ${prospect.name}, ${prospect.title || 'professional'} at ${prospect.company || 'their company'}.\n\n${instructions ? `Campaign instructions: ${instructions}` : ''}\n\nTarget criteria:\n${JSON.stringify(targetCriteria, null, 2)}\n\nWrite a compelling subject line and email body that opens a conversation.`;
+            const systemPrompt = `You are an elite cold email writer who crafts highly personalized, contextually relevant emails that feel like they were written specifically for each individual prospect.
+
+YOUR STRENGTHS:
+- Deep personalization based on prospect's role, company, and industry
+- Natural, human tone that builds genuine connections
+- Value-first approach that respects the prospect's time
+- Strategic use of curiosity and specificity
+- Perfect balance of professionalism and authenticity
+
+WRITING PRINCIPLES:
+1. NEVER use generic openers like "I noticed" or "I came across your profile"
+2. Reference specific, relevant details about their company or role
+3. Lead with value or insight, not your needs
+4. Keep subject lines under 50 characters - make them curiosity-driven
+5. Use {first_name}, {company}, {title} variables for personalization
+6. Write 80-120 words maximum - respect their inbox
+7. End with a clear, low-pressure call to action
+
+QUALITY CHECKLIST:
+✓ Subject line creates curiosity without being clickbait
+✓ Opens with value or relevant insight (not about you)
+✓ References prospect's specific situation
+✓ Tone matches the requested style perfectly
+✓ Contains exactly ONE ask (don't overwhelm)
+✓ Feels personal, not templated
+✓ Grammar and spelling are flawless`;
+
+            const userPrompt = `${contextSummary}
+
+PROSPECT DETAILS:
+Name: ${prospect.name}
+Title: ${prospect.title || 'Professional'}
+Company: ${prospect.company || 'their organization'}
+
+TARGET CRITERIA:
+${JSON.stringify(targetCriteria, null, 2)}
+
+${instructions ? `CAMPAIGN INSTRUCTIONS:\n${instructions}\n` : ''}
+
+REQUIRED STYLE:
+Tone: ${toneInstruction}
+Goal: ${goalInstruction}
+Word Count: 80-120 words
+
+IMPORTANT:
+- Reference their specific role (${prospect.title}) and company (${prospect.company})
+- Make it feel like you've done research on them specifically
+- Use conversational language that matches the tone
+- Subject line must be under 50 characters
+- Focus on THEIR potential benefit, not your offering
+
+Return ONLY a JSON object with this exact format:
+{
+  "subject": "curiosity-driven subject under 50 chars",
+  "body": "personalized email body using {first_name}, {company}, {title} variables"
+}`;
 
             // Generate email using OpenAI
             console.log(`Calling OpenAI for prospect ${i + 1}`);

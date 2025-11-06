@@ -132,8 +132,9 @@ export function ProspectCard({
   return (
     <Card
       className={cn(
-        'border-border/50 hover:border-primary/30 transition-all group',
+        'border-border/50 hover:border-primary/30 transition-all group animate-fade-in',
         'hover:shadow-md',
+        status === 'researching' && 'animate-pulse',
         className
       )}
       role="article"

@@ -321,25 +321,53 @@ export const ExecutionMonitor = ({ executionId }: ExecutionMonitorProps) => {
         <TabsContent value="logs" className="mt-4">
           <Card className="border-border/50">
             <ScrollArea className="h-[400px]">
-              <div className="p-4 space-y-2">
+              <div className="space-y-3 p-4">
                 {execution.progress_logs && execution.progress_logs.length > 0 ? (
-                  execution.progress_logs.map((log: any, index: number) => (
-                    <div key={index} className="flex items-start gap-2 text-sm p-2 rounded-lg hover:bg-muted/30 transition-colors">
-                      <Clock className="h-3 w-3 mt-1 text-muted-foreground flex-shrink-0" />
-                      <div className="flex-1">
-                        <p className="text-foreground">{log.message}</p>
-                        {log.timestamp && (
-                          <p className="text-xs text-muted-foreground">
-                            {new Date(log.timestamp).toLocaleTimeString()}
-                          </p>
+                  execution.progress_logs.map((log: any, index: number) => {
+                    const logText = typeof log === 'string' ? log : (log.message || JSON.stringify(log));
+                    const logType = logText.includes('Found:') || logText.includes('prospects found') ? 'prospect_found' :
+                                  logText.includes('Email generated') || logText.includes('✨') ? 'email_generated' :
+                                  logText.includes('Sending') || logText.includes('📤') ? 'email_sending' :
+                                  logText.includes('✅') && logText.includes('sent') ? 'email_sent' :
+                                  logText.includes('❌') || logText.includes('error') ? 'error' :
+                                  logText.includes('🔍') || logText.includes('Searching') ? 'searching' : 'info';
+                    
+                    return (
+                      <div
+                        key={index}
+                        className={cn(
+                          "flex items-start gap-3 p-3 rounded-lg transition-all animate-fade-in",
+                          logType === 'prospect_found' && "bg-blue-500/10 border border-blue-500/20",
+                          logType === 'email_generated' && "bg-purple-500/10 border border-purple-500/20",
+                          logType === 'email_sent' && "bg-green-500/10 border border-green-500/20",
+                          logType === 'email_sending' && "bg-yellow-500/10 border border-yellow-500/20",
+                          logType === 'error' && "bg-red-500/10 border border-red-500/20",
+                          logType === 'searching' && "bg-cyan-500/10 border border-cyan-500/20",
+                          logType === 'info' && "bg-muted/50 border border-border/50"
                         )}
+                      >
+                        <div className="flex-shrink-0 mt-0.5">
+                          {logType === 'prospect_found' && <Users className="h-4 w-4 text-blue-500" />}
+                          {logType === 'email_generated' && <Sparkles className="h-4 w-4 text-purple-500" />}
+                          {logType === 'email_sent' && <CheckCircle2 className="h-4 w-4 text-green-500" />}
+                          {logType === 'email_sending' && <Send className="h-4 w-4 text-yellow-500 animate-pulse" />}
+                          {logType === 'error' && <AlertCircle className="h-4 w-4 text-red-500" />}
+                          {logType === 'searching' && <Search className="h-4 w-4 text-cyan-500 animate-spin" />}
+                          {logType === 'info' && <Info className="h-4 w-4 text-muted-foreground" />}
+                        </div>
+                        <p className="text-sm font-mono leading-relaxed break-words flex-1">
+                          {logText}
+                        </p>
                       </div>
-                    </div>
-                  ))
+                    );
+                  })
                 ) : (
-                  <p className="text-sm text-muted-foreground text-center py-8">
-                    No logs yet...
-                  </p>
+                  <div className="text-center p-8 text-muted-foreground">
+                    <div className="flex flex-col items-center gap-2">
+                      <Loader2 className="h-8 w-8 animate-spin opacity-50" />
+                      <p>Waiting for activity...</p>
+                    </div>
+                  </div>
                 )}
               </div>
             </ScrollArea>

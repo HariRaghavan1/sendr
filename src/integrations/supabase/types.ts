@@ -98,6 +98,7 @@ export type Database = {
       }
       campaigns: {
         Row: {
+          conversation_context: Json | null
           created_at: string
           custom_prompt: string | null
           frequency_config: Json
@@ -117,6 +118,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          conversation_context?: Json | null
           created_at?: string
           custom_prompt?: string | null
           frequency_config?: Json
@@ -136,6 +138,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          conversation_context?: Json | null
           created_at?: string
           custom_prompt?: string | null
           frequency_config?: Json
