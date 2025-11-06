@@ -226,7 +226,7 @@ export default function Settings() {
       <main className="container mx-auto px-4 py-8 max-w-2xl">
         <div className="mb-6">
           <h1 className="text-3xl font-bold mb-2">Settings</h1>
-          <p className="text-muted-foreground">Configure your API keys to enable Bork's features</p>
+          <p className="text-muted-foreground">Configure your API keys to enable Sendr's features</p>
         </div>
 
         <Card>

@@ -1,6 +1,6 @@
 # Deployment Guide
 
-This guide walks through deploying Bork (AI Email Outreach Platform) to production.
+This guide walks through deploying Sendr (AI Email Outreach Platform) to production.
 
 ## Table of Contents
 

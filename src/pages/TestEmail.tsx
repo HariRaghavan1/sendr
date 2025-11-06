@@ -9,8 +9,8 @@ import { useToast } from '@/hooks/use-toast';
 
 export default function TestEmail() {
   const [recipientEmail, setRecipientEmail] = useState('hariraghavan2023@gmail.com');
-  const [subject, setSubject] = useState('Test Email from Bork');
-  const [body, setBody] = useState('This is a test email from the Bork email outreach platform. If you receive this, email sending is working correctly!');
+  const [subject, setSubject] = useState('Test Email from Sendr');
+  const [body, setBody] = useState('This is a test email from the Sendr email outreach platform. If you receive this, email sending is working correctly!');
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
 
@@ -100,7 +100,7 @@ export default function TestEmail() {
             <Input
               id="subject"
               type="text"
-              placeholder="Test Email from Bork"
+              placeholder="Test Email from Sendr"
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
             />

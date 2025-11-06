@@ -1,6 +1,6 @@
 -- ============================================================================
 -- COMPLETE SUPABASE SETUP MIGRATION
--- Project: Email Outreach Platform (Bork)
+-- Project: Email Outreach Platform (Sendr)
 -- Run this entire file in your Supabase SQL Editor
 -- ============================================================================
 

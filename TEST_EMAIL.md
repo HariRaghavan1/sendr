@@ -24,8 +24,8 @@ const response = await fetch('https://hstziwxrodpuuzjtvold.supabase.co/functions
   },
   body: JSON.stringify({
     recipient_email: 'nbillimo@ucsc.edu',
-    subject: 'Test Email from Bork',
-    body: 'This is a test email from the Bork email outreach platform. If you receive this, email sending is working correctly!'
+    subject: 'Test Email from Sendr',
+    body: 'This is a test email from the Sendr email outreach platform. If you receive this, email sending is working correctly!'
   })
 });
 
@@ -46,8 +46,8 @@ curl -X POST 'https://hstziwxrodpuuzjtvold.supabase.co/functions/v1/test-send-em
   -H 'Authorization: Bearer YOUR_ACCESS_TOKEN_HERE' \
   -d '{
     "recipient_email": "nbillimo@ucsc.edu",
-    "subject": "Test Email from Bork",
-    "body": "This is a test email from the Bork email outreach platform."
+    "subject": "Test Email from Sendr",
+    "body": "This is a test email from the Sendr email outreach platform."
   }'
 ```
 

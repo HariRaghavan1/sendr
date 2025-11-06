@@ -62,8 +62,8 @@ serve(async (req) => {
     }
 
     // Prepare email content
-    const emailSubject = subject || 'Test Email from Bork';
-    const emailBody = body || 'This is a test email from the Bork email outreach platform.';
+    const emailSubject = subject || 'Test Email from Sendr';
+    const emailBody = body || 'This is a test email from the Sendr email outreach platform.';
     
     console.log(`Sending test email to ${recipient_email} via Composio...`);
     

@@ -1,6 +1,6 @@
-# Bork - AI Email Outreach Platform
+# Sendr - AI Email Outreach Platform
 
-Bork is an AI-powered email outreach and campaign management platform that helps you create, manage, and automate personalized email campaigns with intelligent prospect targeting.
+Sendr is an AI-powered email outreach and campaign management platform that helps you create, manage, and automate personalized email campaigns with intelligent prospect targeting.
 
 ## Features
 

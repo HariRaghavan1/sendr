@@ -118,7 +118,7 @@ export default function Auth() {
           <div className="flex justify-center mb-4">
             <Dog className="h-12 w-12 text-primary" />
           </div>
-          <CardTitle className="text-3xl font-bold">Welcome to Bork</CardTitle>
+          <CardTitle className="text-3xl font-bold">Welcome to Sendr</CardTitle>
           <CardDescription>Your AI Sales Dog - Finds, Writes, and Sends</CardDescription>
         </CardHeader>
         <CardContent>

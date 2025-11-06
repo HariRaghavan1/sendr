@@ -15,7 +15,7 @@ test.describe('Campaign Creation Flow', () => {
 
   test('should display landing page with authentication options', async ({ page }) => {
     // Check for main heading or branding
-    await expect(page.locator('body')).toContainText(/Bork|Email|Campaign/i);
+    await expect(page.locator('body')).toContainText(/Sendr|Email|Campaign/i);
 
     // Authentication should be required
     // User should see sign-in or get started options

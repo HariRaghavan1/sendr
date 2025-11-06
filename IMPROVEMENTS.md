@@ -1,6 +1,6 @@
 # Codebase Improvements Summary
 
-This document outlines all the improvements made to the Bork codebase during the comprehensive audit and refactoring.
+This document outlines all the improvements made to the Sendr codebase during the comprehensive audit and refactoring.
 
 ## Status: ✅ 11/13 P0-P1 Tasks Complete
 

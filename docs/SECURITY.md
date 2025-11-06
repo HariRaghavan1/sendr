@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document outlines the security measures implemented in Bork (AI Email Outreach Platform) to protect user data, prevent unauthorized access, and ensure safe operation.
+This document outlines the security measures implemented in Sendr (AI Email Outreach Platform) to protect user data, prevent unauthorized access, and ensure safe operation.
 
 ## Security Measures Implemented
 
