@@ -100,15 +100,22 @@ Example mega-prompt:
 "Target computer science professors at R1 research universities in the US, focusing on those with active AI/ML research groups. Email should be professional but approachable, 3-4 sentences max. Open by referencing a recent paper or research area. Explain our research collaboration opportunity briefly. Close with specific ask for 15-min call. Send daily at 9 AM EST, 25 per batch. Stop if they reply or bounce. Include {first_name}, {university}, {research_area} variables."
 
 RUNNING TEST RUNS:
-When users want to run a test, use the run_test tool. They can specify:
+When users want to run a test, use the run_test tool with the workflow ID from the most recently created workflow.
+CRITICAL: Always use the workflow UUID (id field), never use the workflow name!
+
+They can specify:
 - Number of prospects (default 5)
 - Whether to use a template
 - Whether to actually send emails (default: skip for testing)
 
+When calling run_test, you MUST use the workflow's UUID that was returned from create_workflow.
+Example: If create_workflow returned { "id": "abc-123-def", "name": "Outreach Campaign" }, 
+use "abc-123-def" NOT "Outreach Campaign" as the workflow_id parameter.
+
 Examples:
-- "Run a test for 3 people" → use run_test with max_prospects: 3
-- "Test this with 10 prospects" → use run_test with max_prospects: 10
-- "Run a test and actually send the emails" → use run_test with skip_sending: false
+- "Run a test for 3 people" → use run_test with workflow_id: <UUID from most recent workflow>, max_prospects: 3
+- "Test this with 10 prospects" → use run_test with workflow_id: <UUID>, max_prospects: 10
+- "Run a test and actually send the emails" → use run_test with workflow_id: <UUID>, skip_sending: false
 
 EMAIL TEMPLATES:
 Users can create email templates with components via chat:
@@ -271,13 +278,13 @@ Be direct and action-oriented. Don't ask unnecessary questions.`
             type: "function",
             function: {
               name: "run_test",
-              description: "Run a test execution of a workflow with specified parameters. Use this when user wants to test a campaign.",
+              description: "Run a test execution of a workflow with specified parameters. Use this when user wants to test a campaign. IMPORTANT: workflow_id must be the UUID returned from create_workflow, NOT the workflow name.",
               parameters: {
                 type: "object",
                 properties: {
                   workflow_id: {
                     type: "string",
-                    description: "ID of the workflow to test"
+                    description: "UUID of the workflow to test (from the 'id' field returned by create_workflow)"
                   },
                   max_prospects: {
                     type: "number",

@@ -352,9 +352,32 @@ try {
           } else if (toolCall.function?.name === 'run_test') {
             try {
               const params = JSON.parse(toolCall.function.arguments);
-              const { workflow_id, max_prospects = 5, skip_sending = true } = params;
+              let { workflow_id, max_prospects = 5, skip_sending = true } = params;
               const { data: { user } } = await supabase.auth.getUser();
               if (!user) throw new Error('Not authenticated');
+
+              // Validate workflow_id is a UUID, if not try to look it up by name
+              const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+              
+              if (!uuidRegex.test(workflow_id)) {
+                console.log('Workflow ID is not a UUID, attempting lookup by name:', workflow_id);
+                // Try to find workflow by name
+                const { data: foundWorkflow, error: lookupError } = await supabase
+                  .from('workflows')
+                  .select('id')
+                  .eq('user_id', user.id)
+                  .eq('name', workflow_id)
+                  .order('created_at', { ascending: false })
+                  .limit(1)
+                  .maybeSingle();
+
+                if (lookupError || !foundWorkflow) {
+                  throw new Error(`Workflow not found with name: "${workflow_id}". Please use the workflow ID instead.`);
+                }
+                
+                workflow_id = foundWorkflow.id;
+                console.log('Found workflow ID:', workflow_id);
+              }
 
               // Create workflow execution
               const { data: execution, error: execError } = await supabase
