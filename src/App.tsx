@@ -41,25 +41,62 @@ const App = () => (
         <Sonner />
         <Routes>
           <Route path="/auth" element={<Auth />} />
-          <Route
-            path="/*"
-            element={
-              <SidebarProvider>
-                <LayoutWithSidebar>
-                  <Routes>
-                    <Route path="/" element={<Navigate to="/dashboard" replace />} />
-                    <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-                    <Route path="/workflows" element={<ProtectedRoute><Workflows /></ProtectedRoute>} />
-                    <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
-                    <Route path="/campaigns/new" element={<ProtectedRoute><CampaignCreate /></ProtectedRoute>} />
-                    <Route path="/campaigns/ai-create" element={<ProtectedRoute><CampaignAICreate /></ProtectedRoute>} />
-                    <Route path="/campaigns/:id" element={<ProtectedRoute><CampaignDetail /></ProtectedRoute>} />
-                    <Route path="*" element={<NotFound />} />
-                  </Routes>
-                </LayoutWithSidebar>
-              </SidebarProvider>
-            }
-          />
+          <Route path="/" element={
+            <SidebarProvider>
+              <LayoutWithSidebar>
+                <Navigate to="/dashboard" replace />
+              </LayoutWithSidebar>
+            </SidebarProvider>
+          } />
+          <Route path="/dashboard" element={
+            <SidebarProvider>
+              <LayoutWithSidebar>
+                <ProtectedRoute><Dashboard /></ProtectedRoute>
+              </LayoutWithSidebar>
+            </SidebarProvider>
+          } />
+          <Route path="/workflows" element={
+            <SidebarProvider>
+              <LayoutWithSidebar>
+                <ProtectedRoute><Workflows /></ProtectedRoute>
+              </LayoutWithSidebar>
+            </SidebarProvider>
+          } />
+          <Route path="/settings" element={
+            <SidebarProvider>
+              <LayoutWithSidebar>
+                <ProtectedRoute><Settings /></ProtectedRoute>
+              </LayoutWithSidebar>
+            </SidebarProvider>
+          } />
+          <Route path="/campaigns/new" element={
+            <SidebarProvider>
+              <LayoutWithSidebar>
+                <ProtectedRoute><CampaignCreate /></ProtectedRoute>
+              </LayoutWithSidebar>
+            </SidebarProvider>
+          } />
+          <Route path="/campaigns/ai-create" element={
+            <SidebarProvider>
+              <LayoutWithSidebar>
+                <ProtectedRoute><CampaignAICreate /></ProtectedRoute>
+              </LayoutWithSidebar>
+            </SidebarProvider>
+          } />
+          <Route path="/campaigns/:id" element={
+            <SidebarProvider>
+              <LayoutWithSidebar>
+                <ProtectedRoute><CampaignDetail /></ProtectedRoute>
+              </LayoutWithSidebar>
+            </SidebarProvider>
+          } />
+          <Route path="*" element={
+            <SidebarProvider>
+              <LayoutWithSidebar>
+                <NotFound />
+              </LayoutWithSidebar>
+            </SidebarProvider>
+          } />
         </Routes>
       </TooltipProvider>
     </BrowserRouter>
