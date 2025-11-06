@@ -62,32 +62,23 @@ serve(async (req) => {
 
     const prospects = await cladoResponse.json();
 
-    // Insert prospects into database
-    const prospectsToInsert = prospects.results?.map((p: any) => ({
-      campaign_id,
-      user_id: user.id,
-      name: p.name,
-      email: p.email,
-      title: p.title,
-      company: p.company,
-      linkedin_url: p.linkedin_url,
+    // Return normalized prospects array (don't insert here - let execute-campaign handle it)
+    const normalizedProspects = prospects.results?.map((p: any) => ({
+      name: p.name || 'Unknown',
+      email: p.email || '',
+      title: p.title || '',
+      company: p.company || '',
+      linkedin_url: p.linkedin_url || '',
     })) || [];
 
-    if (prospectsToInsert.length > 0) {
-      const { error: insertError } = await supabaseClient
-        .from('prospects')
-        .insert(prospectsToInsert);
-
-      if (insertError) {
-        console.error('Error inserting prospects:', insertError);
-      }
-    }
+    console.log(`Found ${normalizedProspects.length} prospects from Clado`);
 
     return new Response(
       JSON.stringify({ 
         success: true, 
-        count: prospectsToInsert.length,
-        message: `Found ${prospectsToInsert.length} prospects` 
+        prospects: normalizedProspects,
+        count: normalizedProspects.length,
+        message: `Found ${normalizedProspects.length} prospects` 
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );

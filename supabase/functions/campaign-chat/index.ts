@@ -282,7 +282,7 @@ Be direct and action-oriented. Don't ask unnecessary questions.`
             type: "function",
             function: {
               name: "run_test",
-              description: "Run a test execution of a workflow with specified parameters. Use this when user wants to test a campaign. IMPORTANT: workflow_id must be the UUID returned from create_workflow, NOT the workflow name. Note: Workflows are automatically linked to campaigns, so the system will find the associated campaign_id.",
+              description: "Run a test execution of a workflow with specified parameters. Use this when user wants to test a campaign. IMPORTANT: workflow_id must be the UUID returned from create_workflow, NOT the workflow name. Note: Workflows are automatically linked to campaigns. Set skip_sending=false if the user explicitly asks to 'send' emails (requires Composio setup with Gmail connected). By default, skip_sending=true for safety (dry run mode).",
               parameters: {
                 type: "object",
                 properties: {

@@ -118,6 +118,27 @@ serve(async (req) => {
           `Processing prospect ${i + 1}/${prospects.length}: ${prospect.name || 'Unknown'}`
         );
 
+        // Insert prospect into database to get UUID
+        const { data: savedProspect, error: prospectError } = await supabase
+          .from('prospects')
+          .insert({
+            campaign_id: campaign_id,
+            user_id: user.id,
+            name: prospect.name,
+            email: prospect.email || '',
+            title: prospect.title || '',
+            company: prospect.company || '',
+            linkedin_url: prospect.linkedin_url || '',
+          })
+          .select()
+          .single();
+
+        if (prospectError || !savedProspect) {
+          throw new Error(`Failed to save prospect: ${prospectError?.message || 'Unknown error'}`);
+        }
+
+        console.log(`Saved prospect ${savedProspect.name} with ID ${savedProspect.id}`);
+
         // Generate email
         let subject, body;
         
@@ -140,7 +161,7 @@ serve(async (req) => {
           
           const { data: emailData, error: emailError } = await supabase.functions.invoke('generate-email', {
             body: {
-              prospect,
+              prospect: savedProspect,
               campaign,
             },
           });
@@ -153,42 +174,57 @@ serve(async (req) => {
           body = emailData.body;
         }
 
-        // Save email to database
-        const { error: saveError } = await supabase
+        // Save email to database with the prospect_id
+        const { data: savedEmail, error: saveError } = await supabase
           .from('emails')
           .insert({
-            prospect_id: prospect.id,
+            prospect_id: savedProspect.id,
             campaign_id: campaign_id,
             user_id: user.id,
             subject,
             body,
-          });
+            send_status: 'pending',
+          })
+          .select()
+          .single();
 
-        if (saveError) {
-          throw new Error(`Failed to save email: ${saveError.message}`);
+        if (saveError || !savedEmail) {
+          throw new Error(`Failed to save email: ${saveError?.message || 'Unknown error'}`);
         }
 
-        // Send email (if not skipped)
+        console.log(`Saved email ${savedEmail.id} for prospect ${savedProspect.name}`);
+
+        // Send email (if not skipped and prospect has email)
         if (!skip_sending) {
-          await updateExecutionLog(supabase, execution.id, `Sending email to ${prospect.email}...`);
-          
-          const { error: sendError } = await supabase.functions.invoke('send-email', {
-            body: {
-              to: prospect.email,
-              subject,
-              body,
-              prospect_id: prospect.id,
-              campaign_id: campaign_id,
-            },
-          });
+          if (!prospect.email || prospect.email.trim() === '') {
+            await updateExecutionLog(supabase, execution.id, `⚠️ Skipped sending for ${prospect.name} - no email address`);
+            await supabase
+              .from('emails')
+              .update({ send_status: 'skipped', send_error: 'No email address' })
+              .eq('id', savedEmail.id);
+          } else {
+            await updateExecutionLog(supabase, execution.id, `Sending email to ${prospect.email}...`);
+            
+            const { error: sendError } = await supabase.functions.invoke('send-email', {
+              body: {
+                email_id: savedEmail.id,
+              },
+            });
 
-          if (sendError) {
-            throw new Error(`Email send failed: ${sendError.message}`);
+            if (sendError) {
+              console.error(`Send failed for ${prospect.email}:`, sendError);
+              await updateExecutionLog(supabase, execution.id, `✗ Failed to send to ${prospect.email}: ${sendError.message}`);
+              throw new Error(`Email send failed: ${sendError.message}`);
+            }
+
+            await updateExecutionLog(supabase, execution.id, `✓ Email sent to ${prospect.email}`);
           }
-
-          await updateExecutionLog(supabase, execution.id, `✓ Email sent to ${prospect.email}`);
         } else {
-          await updateExecutionLog(supabase, execution.id, `✓ Email generated for ${prospect.email} (not sent - dry run)`);
+          await updateExecutionLog(supabase, execution.id, `✓ Email generated for ${prospect.name} (not sent - dry run)`);
+          await supabase
+            .from('emails')
+            .update({ send_status: 'draft' })
+            .eq('id', savedEmail.id);
         }
 
         successCount++;
