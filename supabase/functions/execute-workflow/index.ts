@@ -140,29 +140,101 @@ serve(async (req) => {
         // Generate email using workflow instructions
         await updateExecutionLog(supabase, execution_id, `Generating email for ${prospect.name}...`);
         
-        const { data: emailData, error: emailError } = await supabase.functions.invoke('generate-email', {
-          body: {
-            prospect,
-            campaign: {
-              ...workflow,
-              custom_prompt: instructions,
-              goal: config.goal || 'meeting',
-              tone: config.tone || 'professional',
-            },
-          },
-        });
+        // Get user's OpenAI API key
+        const { data: openaiSettings } = await supabase
+          .from('user_settings')
+          .select('openai_api_key')
+          .eq('user_id', user.id)
+          .single();
 
-        if (emailError) {
-          throw new Error(`Email generation failed: ${emailError.message}`);
+        if (!openaiSettings?.openai_api_key) {
+          throw new Error('OpenAI API key not configured');
         }
 
-        const { subject, body } = emailData;
+        // Build prompts
+        const toneMap: Record<string, string> = {
+          formal: 'professional and formal',
+          casual: 'friendly and conversational',
+          witty: 'playful and witty',
+        };
+        const toneInstruction = toneMap[config.tone] || 'friendly and conversational';
 
-        // For test runs, we don't save to emails table or send
+        const goalMap: Record<string, string> = {
+          demo: 'book a product demo',
+          meeting: 'schedule a quick meeting',
+          partnership: 'explore a potential partnership',
+          other: 'start a conversation',
+        };
+        const goalInstruction = goalMap[config.goal] || 'start a conversation';
+
+        const systemPrompt = `You are an expert cold email writer. Write personalized, compelling emails that feel human and conversational. 
+        
+Guidelines:
+- Keep it under 120 words
+- Use a ${toneInstruction} tone
+- Goal is to ${goalInstruction}
+- Create curiosity, don't hard sell
+- Focus on the prospect's role and potential pain points
+- End with a clear, low-pressure call to action`;
+
+        const userPrompt = `Write a cold email to ${prospect.name}, ${prospect.title || 'professional'} at ${prospect.company || 'their company'}.
+
+${instructions ? `Campaign instructions: ${instructions}` : ''}
+
+Target criteria:
+${JSON.stringify(targetCriteria, null, 2)}
+
+Write a compelling subject line and email body that opens a conversation.`;
+
+        // Generate email using OpenAI
+        const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${openaiSettings.openai_api_key}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'gpt-5-2025-08-07',
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt }
+            ],
+            max_completion_tokens: 300,
+          }),
+        });
+
+        if (!openaiResponse.ok) {
+          const errorText = await openaiResponse.text();
+          throw new Error(`OpenAI API error: ${errorText}`);
+        }
+
+        const openaiData = await openaiResponse.json();
+        const generatedContent = openaiData.choices[0].message.content;
+
+        // Parse subject and body
+        const lines = generatedContent.split('\n');
+        let subject = '';
+        let body = '';
+        
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].toLowerCase().startsWith('subject:')) {
+            subject = lines[i].replace(/^subject:\s*/i, '').trim();
+          } else if (subject && lines[i].trim()) {
+            body = lines.slice(i).join('\n').trim();
+            break;
+          }
+        }
+
+        if (!subject) {
+          subject = 'Quick question';
+          body = generatedContent;
+        }
+
+        // For test runs, we DON'T save to database or send
         await updateExecutionLog(
           supabase, 
           execution_id, 
-          `✓ Email generated for ${prospect.email} (not sent - test run)`
+          `✓ Email generated for ${prospect.email}\nSubject: ${subject}\n(not sent - test run)`
         );
 
         successCount++;
