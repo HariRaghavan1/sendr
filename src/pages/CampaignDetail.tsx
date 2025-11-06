@@ -4,8 +4,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Play, Pause, Trash2, Mail, Eye, MessageSquare, TrendingUp } from "lucide-react";
+import { Play, Pause, Trash2, Mail, Eye, MessageSquare, TrendingUp, TestTube } from "lucide-react";
 import { toast } from "sonner";
+import { TestRunDialog } from "@/components/TestRunDialog";
 import {
   Table,
   TableBody,
@@ -21,6 +22,7 @@ export default function CampaignDetail() {
   const [campaign, setCampaign] = useState<any>(null);
   const [prospects, setProspects] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [testDialogOpen, setTestDialogOpen] = useState(false);
 
   useEffect(() => {
     loadCampaign();
@@ -124,6 +126,10 @@ export default function CampaignDetail() {
             </p>
           </div>
           <div className="flex gap-2">
+            <Button onClick={() => setTestDialogOpen(true)} variant="secondary">
+              <TestTube className="mr-2 h-4 w-4" />
+              Test Run
+            </Button>
             <Button variant="outline" onClick={toggleStatus}>
               {campaign.status === "active" ? (
                 <>
@@ -267,6 +273,12 @@ export default function CampaignDetail() {
           </CardContent>
         </Card>
       </div>
+
+      <TestRunDialog 
+        open={testDialogOpen}
+        onOpenChange={setTestDialogOpen}
+        campaignId={id!}
+      />
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { Dog, Plus, Settings as SettingsIcon, LogOut, Sparkles, LayoutGrid } from "lucide-react";
+import { MessageSquare, Plus, Settings as SettingsIcon, LogOut, LayoutGrid } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -18,6 +18,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
+import { ConversationList } from "./ConversationList";
 
 export function AppSidebar() {
   const navigate = useNavigate();
@@ -55,27 +56,12 @@ export function AppSidebar() {
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
       <SidebarHeader className="border-b border-sidebar-border p-4">
         <div className="flex items-center gap-2">
-          <Dog className="h-6 w-6 text-primary shrink-0" />
-          {!collapsed && <span className="text-xl font-bold">Bork</span>}
+          <MessageSquare className="h-6 w-6 text-primary shrink-0" />
+          {!collapsed && <span className="text-xl font-bold">OutreachAI</span>}
         </div>
       </SidebarHeader>
 
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupContent className="px-2 py-2">
-            <Button
-              onClick={() => navigate("/campaigns/ai-create")}
-              className="w-full justify-start gap-2"
-              size={collapsed ? "icon" : "default"}
-            >
-              <Plus className="h-4 w-4 shrink-0" />
-              {!collapsed && <span>New Campaign</span>}
-            </Button>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <Separator className="my-2" />
-
         <SidebarGroup>
           <SidebarGroupLabel className={collapsed ? "sr-only" : ""}>
             Navigation
@@ -90,48 +76,17 @@ export function AppSidebar() {
                   </NavLink>
                 </SidebarMenuButton>
               </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild>
-                  <NavLink to="/workflows" className={({ isActive }) => isActive ? "bg-sidebar-accent" : ""}>
-                    <Sparkles className="h-4 w-4" />
-                    {!collapsed && <span>All Workflows</span>}
-                  </NavLink>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {campaigns.length > 0 && (
-          <>
-            <Separator className="my-2" />
-            <SidebarGroup>
-              <SidebarGroupLabel className={collapsed ? "sr-only" : ""}>
-                Recent Campaigns
-              </SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {campaigns.slice(0, 5).map((campaign) => (
-                    <SidebarMenuItem key={campaign.id}>
-                      <SidebarMenuButton asChild>
-                        <NavLink 
-                          to={`/campaigns/${campaign.id}`}
-                          className={({ isActive }) => isActive ? "bg-sidebar-accent" : ""}
-                        >
-                          <div className="h-4 w-4 shrink-0 rounded-full bg-primary/20 flex items-center justify-center">
-                            <div className="h-2 w-2 rounded-full bg-primary" />
-                          </div>
-                          {!collapsed && (
-                            <span className="truncate">{campaign.name}</span>
-                          )}
-                        </NavLink>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-          </>
+        <Separator className="my-2" />
+
+        {!collapsed && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Conversations</SidebarGroupLabel>
+            <ConversationList />
+          </SidebarGroup>
         )}
       </SidebarContent>
 

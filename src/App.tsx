@@ -10,7 +10,7 @@ import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import Settings from "./pages/Settings";
 import CampaignCreate from "./pages/CampaignCreate";
-import CampaignAICreate from "./pages/CampaignAICreate";
+import ConversationView from "./pages/ConversationView";
 import CampaignDetail from "./pages/CampaignDetail";
 import Workflows from "./pages/Workflows";
 import NotFound from "./pages/NotFound";
@@ -79,7 +79,14 @@ const App = () => (
           <Route path="/campaigns/ai-create" element={
             <SidebarProvider>
               <LayoutWithSidebar>
-                <ProtectedRoute><CampaignAICreate /></ProtectedRoute>
+                <ProtectedRoute><ConversationView /></ProtectedRoute>
+              </LayoutWithSidebar>
+            </SidebarProvider>
+          } />
+          <Route path="/campaigns/ai-create/:conversationId" element={
+            <SidebarProvider>
+              <LayoutWithSidebar>
+                <ProtectedRoute><ConversationView /></ProtectedRoute>
               </LayoutWithSidebar>
             </SidebarProvider>
           } />

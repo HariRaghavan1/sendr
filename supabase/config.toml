@@ -27,3 +27,6 @@ verify_jwt = true
 
 [functions.campaign-chat]
 verify_jwt = true
+
+[functions.execute-campaign]
+verify_jwt = true

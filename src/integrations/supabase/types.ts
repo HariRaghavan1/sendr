@@ -14,6 +14,88 @@ export type Database = {
   }
   public: {
     Tables: {
+      campaign_conversations: {
+        Row: {
+          campaign_id: string | null
+          created_at: string
+          id: string
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          campaign_id?: string | null
+          created_at?: string
+          id?: string
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          campaign_id?: string | null
+          created_at?: string
+          id?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_conversations_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      campaign_executions: {
+        Row: {
+          campaign_id: string
+          completed_at: string | null
+          execution_type: Database["public"]["Enums"]["execution_type"]
+          id: string
+          processed_prospects: number
+          progress_logs: Json
+          started_at: string
+          status: Database["public"]["Enums"]["execution_status"]
+          total_prospects: number
+          user_id: string
+        }
+        Insert: {
+          campaign_id: string
+          completed_at?: string | null
+          execution_type?: Database["public"]["Enums"]["execution_type"]
+          id?: string
+          processed_prospects?: number
+          progress_logs?: Json
+          started_at?: string
+          status?: Database["public"]["Enums"]["execution_status"]
+          total_prospects?: number
+          user_id: string
+        }
+        Update: {
+          campaign_id?: string
+          completed_at?: string | null
+          execution_type?: Database["public"]["Enums"]["execution_type"]
+          id?: string
+          processed_prospects?: number
+          progress_logs?: Json
+          started_at?: string
+          status?: Database["public"]["Enums"]["execution_status"]
+          total_prospects?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_executions_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       campaigns: {
         Row: {
           created_at: string
@@ -73,6 +155,38 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      conversation_messages: {
+        Row: {
+          content: string
+          conversation_id: string
+          created_at: string
+          id: string
+          role: string
+        }
+        Insert: {
+          content: string
+          conversation_id: string
+          created_at?: string
+          id?: string
+          role: string
+        }
+        Update: {
+          content?: string
+          conversation_id?: string
+          created_at?: string
+          id?: string
+          role?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conversation_messages_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "campaign_conversations"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       emails: {
         Row: {
@@ -356,6 +470,8 @@ export type Database = {
       campaign_status: "draft" | "active" | "paused" | "completed"
       email_goal: "demo" | "meeting" | "partnership" | "other"
       email_tone: "formal" | "casual" | "witty"
+      execution_status: "running" | "completed" | "failed" | "cancelled"
+      execution_type: "test" | "production"
       prospect_status:
         | "pending"
         | "sent"
@@ -494,6 +610,8 @@ export const Constants = {
       campaign_status: ["draft", "active", "paused", "completed"],
       email_goal: ["demo", "meeting", "partnership", "other"],
       email_tone: ["formal", "casual", "witty"],
+      execution_status: ["running", "completed", "failed", "cancelled"],
+      execution_type: ["test", "production"],
       prospect_status: [
         "pending",
         "sent",
