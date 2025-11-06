@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.75.1';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -13,12 +14,37 @@ serve(async (req) => {
 
   try {
     const { message } = await req.json();
-    const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
-
-    if (!OPENAI_API_KEY) {
-      throw new Error('OPENAI_API_KEY is not configured');
+    
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      throw new Error('Missing authorization header');
     }
 
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    
+    const supabaseClient = createClient(supabaseUrl, supabaseServiceKey, {
+      global: {
+        headers: { Authorization: authHeader }
+      }
+    });
+
+    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+    if (userError || !user) {
+      throw new Error('User not authenticated');
+    }
+
+    const { data: settings, error: settingsError } = await supabaseClient
+      .from('user_settings')
+      .select('openai_api_key')
+      .eq('user_id', user.id)
+      .single();
+
+    if (settingsError || !settings?.openai_api_key) {
+      throw new Error('OpenAI API key not configured. Please add it in Settings.');
+    }
+
+    const OPENAI_API_KEY = settings.openai_api_key;
     console.log('Parsing campaign intent:', message);
 
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
