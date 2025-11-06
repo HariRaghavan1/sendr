@@ -39,14 +39,17 @@ serve(async (req) => {
       .single();
 
     if (workflowError || !workflow) {
-      throw new Error('Workflow not found');
+      return new Response(
+        JSON.stringify({ execution_id, message: 'Workflow not found' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     const config = workflow.workflow_config || {};
     const targetCriteria = config.target_criteria || {};
     const instructions = workflow.instructions || '';
 
-    // Add initial log
+    // Start log
     await updateExecutionLog(supabase, execution_id, 'Test run started');
 
     // Get user's Clado API key for prospect search
@@ -59,11 +62,8 @@ serve(async (req) => {
     if (!settings?.clado_api_key) {
       await failExecution(supabase, execution_id, 'Clado API key not configured. Please add it in Settings.');
       return new Response(
-        JSON.stringify({ error: 'Clado API key not configured' }),
-        { 
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        }
+        JSON.stringify({ execution_id, message: 'Missing Clado API key' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -78,36 +78,35 @@ serve(async (req) => {
       },
       body: JSON.stringify({
         criteria: targetCriteria,
-        limit: 5, // Limit to 5 for test runs
+        limit: 5,
       }),
     });
 
+    let prospects: any[] = [];
     if (!cladoResponse.ok) {
       const errorText = await cladoResponse.text();
       await failExecution(supabase, execution_id, `Failed to find prospects: ${errorText}`);
-      throw new Error(`Clado API error: ${errorText}`);
+      return new Response(
+        JSON.stringify({ execution_id, message: 'Failed to find prospects' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    } else {
+      const cladoData = await cladoResponse.json();
+      prospects = (cladoData.results || []).map((result: any) => ({
+        id: crypto.randomUUID(),
+        name: result.name || 'Unknown',
+        email: result.email || '',
+        title: result.title || '',
+        company: result.company || '',
+        linkedin_url: result.linkedin_url || '',
+      }));
     }
-
-    const cladoData = await cladoResponse.json();
-    const prospects = (cladoData.results || []).map((result: any) => ({
-      id: crypto.randomUUID(),
-      name: result.name || 'Unknown',
-      email: result.email || '',
-      title: result.title || '',
-      company: result.company || '',
-      linkedin_url: result.linkedin_url || '',
-    }));
 
     if (prospects.length === 0) {
       await updateExecutionLog(supabase, execution_id, 'No prospects found matching criteria');
       await completeExecution(supabase, execution_id);
-      
       return new Response(
-        JSON.stringify({ 
-          execution_id,
-          message: 'No prospects found',
-          prospects_processed: 0,
-        }),
+        JSON.stringify({ execution_id, message: 'No prospects found', prospects_processed: 0 }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -115,10 +114,7 @@ serve(async (req) => {
     // Update total prospects
     await supabase
       .from('workflow_executions')
-      .update({ 
-        total_prospects: prospects.length,
-        prospects_found: prospects.length 
-      })
+      .update({ total_prospects: prospects.length, prospects_found: prospects.length })
       .eq('id', execution_id);
 
     await updateExecutionLog(supabase, execution_id, `Found ${prospects.length} prospects`);
@@ -127,157 +123,142 @@ serve(async (req) => {
     let successCount = 0;
     let failCount = 0;
 
-    for (let i = 0; i < prospects.length; i++) {
-      const prospect = prospects[i];
-      
-      try {
-        await updateExecutionLog(
-          supabase, 
-          execution_id, 
-          `Processing prospect ${i + 1}/${prospects.length}: ${prospect.name || 'Unknown'}`
-        );
+        for (let i = 0; i < prospects.length; i++) {
+          const prospect = prospects[i];
+          
+          try {
+            await updateExecutionLog(
+              supabase, 
+              execution_id, 
+              `Processing prospect ${i + 1}/${prospects.length}: ${prospect.name || 'Unknown'}`
+            );
 
-        // Generate email using workflow instructions
-        await updateExecutionLog(supabase, execution_id, `Generating email for ${prospect.name}...`);
-        
-        // Get user's OpenAI API key
-        const { data: openaiSettings } = await supabase
-          .from('user_settings')
-          .select('openai_api_key')
-          .eq('user_id', user.id)
-          .single();
+            // Generate email using workflow instructions
+            await updateExecutionLog(supabase, execution_id, `Generating email for ${prospect.name}...`);
+            
+            // Get user's OpenAI API key
+            const { data: openaiSettings } = await supabase
+              .from('user_settings')
+              .select('openai_api_key')
+              .eq('user_id', user.id)
+              .single();
 
-        if (!openaiSettings?.openai_api_key) {
-          throw new Error('OpenAI API key not configured');
-        }
+            if (!openaiSettings?.openai_api_key) {
+              throw new Error('OpenAI API key not configured');
+            }
 
-        // Build prompts
-        const toneMap: Record<string, string> = {
-          formal: 'professional and formal',
-          casual: 'friendly and conversational',
-          witty: 'playful and witty',
-        };
-        const toneInstruction = toneMap[config.tone] || 'friendly and conversational';
+            // Build prompts
+            const toneMap: Record<string, string> = {
+              formal: 'professional and formal',
+              casual: 'friendly and conversational',
+              witty: 'playful and witty',
+            };
+            const toneInstruction = toneMap[config.tone] || 'friendly and conversational';
 
-        const goalMap: Record<string, string> = {
-          demo: 'book a product demo',
-          meeting: 'schedule a quick meeting',
-          partnership: 'explore a potential partnership',
-          other: 'start a conversation',
-        };
-        const goalInstruction = goalMap[config.goal] || 'start a conversation';
+            const goalMap: Record<string, string> = {
+              demo: 'book a product demo',
+              meeting: 'schedule a quick meeting',
+              partnership: 'explore a potential partnership',
+              other: 'start a conversation',
+            };
+            const goalInstruction = goalMap[config.goal] || 'start a conversation';
 
-        const systemPrompt = `You are an expert cold email writer. Write personalized, compelling emails that feel human and conversational. 
-        
-Guidelines:
-- Keep it under 120 words
-- Use a ${toneInstruction} tone
-- Goal is to ${goalInstruction}
-- Create curiosity, don't hard sell
-- Focus on the prospect's role and potential pain points
-- End with a clear, low-pressure call to action`;
+            const systemPrompt = `You are an expert cold email writer. Write personalized, compelling emails that feel human and conversational. \n\nGuidelines:\n- Keep it under 120 words\n- Use a ${toneInstruction} tone\n- Goal is to ${goalInstruction}\n- Create curiosity, don't hard sell\n- Focus on the prospect's role and potential pain points\n- End with a clear, low-pressure call to action`;
 
-        const userPrompt = `Write a cold email to ${prospect.name}, ${prospect.title || 'professional'} at ${prospect.company || 'their company'}.
+            const userPrompt = `Write a cold email to ${prospect.name}, ${prospect.title || 'professional'} at ${prospect.company || 'their company'}.\n\n${instructions ? `Campaign instructions: ${instructions}` : ''}\n\nTarget criteria:\n${JSON.stringify(targetCriteria, null, 2)}\n\nWrite a compelling subject line and email body that opens a conversation.`;
 
-${instructions ? `Campaign instructions: ${instructions}` : ''}
+            // Generate email using OpenAI
+            const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${openaiSettings.openai_api_key}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                model: 'gpt-5-2025-08-07',
+                messages: [
+                  { role: 'system', content: systemPrompt },
+                  { role: 'user', content: userPrompt }
+                ],
+                max_completion_tokens: 300,
+              }),
+            });
 
-Target criteria:
-${JSON.stringify(targetCriteria, null, 2)}
+            if (!openaiResponse.ok) {
+              const errorText = await openaiResponse.text();
+              throw new Error(`OpenAI API error: ${errorText}`);
+            }
 
-Write a compelling subject line and email body that opens a conversation.`;
+            const openaiData = await openaiResponse.json();
+            const generatedContent = openaiData.choices[0].message.content;
 
-        // Generate email using OpenAI
-        const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${openaiSettings.openai_api_key}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: 'gpt-5-2025-08-07',
-            messages: [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: userPrompt }
-            ],
-            max_completion_tokens: 300,
-          }),
-        });
+            // Parse subject and body
+            const lines = generatedContent.split('\n');
+            let subject = '';
+            let body = '';
+            
+            for (let i = 0; i < lines.length; i++) {
+              if (lines[i].toLowerCase().startsWith('subject:')) {
+                subject = lines[i].replace(/^subject:\\s*/i, '').trim();
+              } else if (subject && lines[i].trim()) {
+                body = lines.slice(i).join('\n').trim();
+                break;
+              }
+            }
 
-        if (!openaiResponse.ok) {
-          const errorText = await openaiResponse.text();
-          throw new Error(`OpenAI API error: ${errorText}`);
-        }
+            if (!subject) {
+              subject = 'Quick question';
+              body = generatedContent;
+            }
 
-        const openaiData = await openaiResponse.json();
-        const generatedContent = openaiData.choices[0].message.content;
+            // For test runs, we DON'T save to database or send
+            await updateExecutionLog(
+              supabase, 
+              execution_id, 
+              `✓ Email generated for ${prospect.email}\nSubject: ${subject}\n(not sent - test run)`
+            );
 
-        // Parse subject and body
-        const lines = generatedContent.split('\n');
-        let subject = '';
-        let body = '';
-        
-        for (let i = 0; i < lines.length; i++) {
-          if (lines[i].toLowerCase().startsWith('subject:')) {
-            subject = lines[i].replace(/^subject:\s*/i, '').trim();
-          } else if (subject && lines[i].trim()) {
-            body = lines.slice(i).join('\n').trim();
-            break;
+            successCount++;
+
+          } catch (error: any) {
+            console.error(`Error processing prospect ${prospect.name}:`, error);
+            await updateExecutionLog(
+              supabase, 
+              execution_id, 
+              `✗ Failed to process ${prospect.name}: ${error.message}`
+            );
+            failCount++;
           }
+
+          // Update progress
+          await supabase
+            .from('workflow_executions')
+            .update({ 
+              emails_generated: successCount,
+              execution_log: [] // Will be populated by updateExecutionLog
+            })
+            .eq('id', execution_id);
         }
 
-        if (!subject) {
-          subject = 'Quick question';
-          body = generatedContent;
-        }
-
-        // For test runs, we DON'T save to database or send
+        // Complete execution
         await updateExecutionLog(
           supabase, 
           execution_id, 
-          `✓ Email generated for ${prospect.email}\nSubject: ${subject}\n(not sent - test run)`
+          `Test run completed: ${successCount} successful, ${failCount} failed`
         );
+        
+        await completeExecution(supabase, execution_id);
 
-        successCount++;
-
-      } catch (error: any) {
-        console.error(`Error processing prospect ${prospect.name}:`, error);
-        await updateExecutionLog(
-          supabase, 
-          execution_id, 
-          `✗ Failed to process ${prospect.name}: ${error.message}`
+        return new Response(
+          JSON.stringify({
+            execution_id,
+            message: 'Test run completed',
+            prospects_processed: prospects.length,
+            success_count: successCount,
+            fail_count: failCount,
+          }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
-        failCount++;
-      }
-
-      // Update progress
-      await supabase
-        .from('workflow_executions')
-        .update({ 
-          emails_generated: successCount,
-          execution_log: [] // Will be populated by updateExecutionLog
-        })
-        .eq('id', execution_id);
-    }
-
-    // Complete execution
-    await updateExecutionLog(
-      supabase, 
-      execution_id, 
-      `Test run completed: ${successCount} successful, ${failCount} failed`
-    );
-    
-    await completeExecution(supabase, execution_id);
-
-    return new Response(
-      JSON.stringify({
-        execution_id,
-        message: 'Test run completed',
-        prospects_processed: prospects.length,
-        success_count: successCount,
-        fail_count: failCount,
-      }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
 
   } catch (error: any) {
     console.error('Error in execute-workflow:', error);
