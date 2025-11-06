@@ -246,6 +246,9 @@ export type Database = {
           opened_at: string | null
           prospect_id: string
           replied_at: string | null
+          send_attempted_at: string | null
+          send_error: string | null
+          send_status: string | null
           sent_at: string | null
           subject: string
           user_id: string
@@ -260,6 +263,9 @@ export type Database = {
           opened_at?: string | null
           prospect_id: string
           replied_at?: string | null
+          send_attempted_at?: string | null
+          send_error?: string | null
+          send_status?: string | null
           sent_at?: string | null
           subject: string
           user_id: string
@@ -274,6 +280,9 @@ export type Database = {
           opened_at?: string | null
           prospect_id?: string
           replied_at?: string | null
+          send_attempted_at?: string | null
+          send_error?: string | null
+          send_status?: string | null
           sent_at?: string | null
           subject?: string
           user_id?: string

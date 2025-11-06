@@ -77,11 +77,23 @@ serve(async (req) => {
       const errorText = await composioResponse.text();
       console.error('Composio API error:', composioResponse.status, errorText);
       
+      // Update email status to failed
+      await supabaseClient
+        .from('emails')
+        .update({
+          send_status: 'failed',
+          send_error: `Composio error ${composioResponse.status}: ${errorText}`,
+          send_attempted_at: new Date().toISOString()
+        })
+        .eq('id', email_id);
+      
       // Provide helpful error messages
       if (composioResponse.status === 401) {
         throw new Error('Composio authentication failed. Please check your API key in Settings.');
       } else if (composioResponse.status === 403) {
-        throw new Error('Gmail account not connected. Please connect Gmail at app.composio.dev');
+        throw new Error('Gmail not connected. Visit app.composio.dev → Connections → Add Gmail → Use Entity ID: ' + user.id);
+      } else if (composioResponse.status === 404) {
+        throw new Error('Gmail connection not found. Visit app.composio.dev and connect Gmail with Entity ID: ' + user.id);
       } else if (composioResponse.status === 429) {
         throw new Error('Rate limit exceeded. Please wait and try again.');
       }
@@ -97,7 +109,9 @@ serve(async (req) => {
       .from('emails')
       .update({
         sent_at: new Date().toISOString(),
-        external_id: result.id,
+        external_id: result.id || result.messageId,
+        send_status: 'sent',
+        send_attempted_at: new Date().toISOString()
       })
       .eq('id', email_id);
 

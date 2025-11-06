@@ -516,23 +516,142 @@ serve(async (req) => {
               body = generatedContent;
             }
 
-            // For test runs, we DON'T save to database or send
+            // Calculate email quality
+            const qualityScore = calculateEmailQuality(subject, body);
+
             await updateExecutionLog(
               supabase,
               execution_id,
-              `[3/3] ✅ OpenAI: Generated email ${i + 1}/${prospects.length}\n📧 To: ${prospect.email}\n📝 Subject: ${subject}\n(Test mode - not sent)`
+              `[3/3] ✅ OpenAI: Generated email ${i + 1}/${prospects.length} (Quality: ${qualityScore})`
             );
+
+            // Save email to database first
+            let savedEmail = null;
+            let sendStatus = 'skipped';
+            let emailSendError = null;
+
+            // Check if prospect has email (skip sending if not)
+            const skipSending = !prospect.email || prospect.email.trim() === '';
+
+            if (skipSending) {
+              await updateExecutionLog(
+                supabase,
+                execution_id,
+                `⚠️ Skipping send for ${prospect.name} - no email address`
+              );
+            }
+
+            try {
+              const { data: email, error: saveError } = await supabase
+                .from('emails')
+                .insert({
+                  prospect_id: prospect.id,
+                  campaign_id: workflow.id,
+                  user_id: user.id,
+                  subject: subject,
+                  body: body,
+                  send_status: skipSending ? 'skipped' : 'pending',
+                })
+                .select()
+                .single();
+
+              if (saveError) {
+                console.error('Failed to save email:', saveError);
+                throw new Error(`Failed to save email: ${saveError.message}`);
+              }
+
+              savedEmail = email;
+
+              // Send email via Composio if not skipped
+              if (!skipSending) {
+                await updateExecutionLog(
+                  supabase,
+                  execution_id,
+                  `📤 Sending email to ${prospect.email}...`
+                );
+
+                await supabase
+                  .from('emails')
+                  .update({ 
+                    send_status: 'sending',
+                    send_attempted_at: new Date().toISOString()
+                  })
+                  .eq('id', email.id);
+
+                const { data: sendResult, error: sendError } = await supabase.functions.invoke('send-email', {
+                  body: { email_id: email.id }
+                });
+
+                if (sendError) {
+                  console.error('Send email error:', sendError);
+                  sendStatus = 'failed';
+                  emailSendError = sendError.message;
+                  
+                  await supabase
+                    .from('emails')
+                    .update({ 
+                      send_status: 'failed',
+                      send_error: sendError.message
+                    })
+                    .eq('id', email.id);
+
+                  await updateExecutionLog(
+                    supabase,
+                    execution_id,
+                    `❌ Failed to send to ${prospect.email}: ${sendError.message}`
+                  );
+                } else if (sendResult?.error) {
+                  sendStatus = 'failed';
+                  emailSendError = sendResult.error;
+                  
+                  await supabase
+                    .from('emails')
+                    .update({ 
+                      send_status: 'failed',
+                      send_error: sendResult.error
+                    })
+                    .eq('id', email.id);
+
+                  await updateExecutionLog(
+                    supabase,
+                    execution_id,
+                    `❌ Failed to send to ${prospect.email}: ${sendResult.error}`
+                  );
+                } else {
+                  sendStatus = 'sent';
+                  await updateExecutionLog(
+                    supabase,
+                    execution_id,
+                    `✅ Email sent to ${prospect.email}`
+                  );
+                }
+              }
+            } catch (saveErr: any) {
+              console.error('Error saving/sending email:', saveErr);
+              sendStatus = 'failed';
+              emailSendError = saveErr.message;
+              
+              await updateExecutionLog(
+                supabase,
+                execution_id,
+                `❌ Error for ${prospect.name}: ${saveErr.message}`
+              );
+            }
 
             // Store structured email data for UI
             const emailData = {
+              email_id: savedEmail?.id,
               prospect_id: prospect.id,
               prospect_name: prospect.name,
+              prospect_email: prospect.email || 'No email',
               subject: subject,
               body: body,
               generated_at: new Date().toISOString(),
               index: i,
               word_count: body.split(/\s+/).length,
-              quality_score: calculateEmailQuality(subject, body)
+              quality_score: qualityScore,
+              send_status: sendStatus,
+              send_error: emailSendError
             };
 
             // Add to emails_data array

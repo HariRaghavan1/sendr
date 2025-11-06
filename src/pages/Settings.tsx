@@ -13,6 +13,8 @@ export default function Settings() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [userId, setUserId] = useState<string>("");
   
   const [settings, setSettings] = useState({
     clado_api_key: "",
@@ -31,6 +33,8 @@ export default function Settings() {
   const loadSettings = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
+
+    setUserId(user.id);
 
     const { data, error } = await supabase
       .from("user_settings")
@@ -97,6 +101,46 @@ export default function Settings() {
 
   const isKeyConfigured = (key: string) => {
     return settings[key as keyof typeof settings]?.length > 0;
+  };
+
+  const testComposioConnection = async () => {
+    if (!settings.composio_api_key) {
+      toast.error("Please save your Composio API key first");
+      return;
+    }
+
+    setTestingConnection(true);
+    try {
+      const response = await fetch(
+        `https://backend.composio.dev/api/v2/connections?entityId=${userId}`,
+        {
+          headers: {
+            'X-API-Key': settings.composio_api_key,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const connections = await response.json();
+      const gmailConnected = connections.some((c: any) => 
+        c.appName?.toLowerCase() === 'gmail' || c.integrationId?.toLowerCase().includes('gmail')
+      );
+
+      if (gmailConnected) {
+        toast.success("✅ Gmail is connected and ready to send emails!");
+      } else {
+        toast.error("❌ Gmail not connected. Follow the setup guide below.");
+      }
+    } catch (error: any) {
+      console.error("Connection test failed:", error);
+      toast.error("Failed to test connection: " + error.message);
+    } finally {
+      setTestingConnection(false);
+    }
   };
 
   if (loading) {
@@ -196,11 +240,52 @@ export default function Settings() {
               <p className="text-xs text-muted-foreground">
                 Used for email sending via Gmail/Outlook. Get your key at <a href="https://app.composio.dev" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">app.composio.dev</a>
               </p>
-              <div className="mt-2 p-3 rounded-lg bg-muted/50 border border-border">
-                <p className="text-xs font-medium mb-1">📧 Gmail Connection Required</p>
-                <p className="text-xs text-muted-foreground">
-                  After saving your Composio API key, visit <a href="https://app.composio.dev" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline font-medium">app.composio.dev</a> to connect your Gmail account. This allows Bork to send emails on your behalf.
-                </p>
+              
+              {isKeyConfigured("composio_api_key") && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={testComposioConnection}
+                  disabled={testingConnection}
+                  className="mt-2 w-full"
+                >
+                  {testingConnection ? "Testing..." : "Test Gmail Connection"}
+                </Button>
+              )}
+
+              <div className="mt-3 p-4 rounded-lg bg-primary/5 border border-primary/20">
+                <p className="text-sm font-semibold mb-2 text-foreground">📧 How to Connect Gmail:</p>
+                <ol className="text-xs space-y-2 text-muted-foreground">
+                  <li className="flex gap-2">
+                    <span className="font-medium text-foreground">1.</span>
+                    <span>Go to <a href="https://app.composio.dev" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline font-medium">app.composio.dev</a></span>
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="font-medium text-foreground">2.</span>
+                    <span>Navigate to <strong>Connections</strong> → <strong>Add Connection</strong></span>
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="font-medium text-foreground">3.</span>
+                    <span>Select <strong>Gmail</strong> integration</span>
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="font-medium text-foreground">4.</span>
+                    <div className="flex-1">
+                      <span>Set <strong>Entity ID</strong> to:</span>
+                      <code className="block mt-1 px-2 py-1 bg-muted rounded text-xs font-mono break-all">
+                        {userId || "Loading..."}
+                      </code>
+                    </div>
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="font-medium text-foreground">5.</span>
+                    <span>Click <strong>Authorize</strong> and log in with your Gmail account</span>
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="font-medium text-foreground">6.</span>
+                    <span>Return here and click <strong>Test Gmail Connection</strong></span>
+                  </li>
+                </ol>
               </div>
             </div>
 

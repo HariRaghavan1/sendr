@@ -21,14 +21,18 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
 export interface EmailData {
+  email_id?: string;
   prospect_id: string;
   prospect_name: string;
+  prospect_email?: string;
   subject: string;
   body: string;
   generated_at?: string;
   index?: number;
   word_count?: number;
   quality_score?: number;
+  send_status?: 'pending' | 'sending' | 'sent' | 'failed' | 'skipped';
+  send_error?: string;
 }
 
 interface EmailPreviewCardProps {
@@ -177,6 +181,27 @@ export function EmailPreviewCard({
 
               {/* Metadata */}
               <div className="flex items-center gap-3 mt-2 flex-wrap">
+                {/* Send Status */}
+                {email.send_status && (
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      'text-xs',
+                      email.send_status === 'sent' && 'bg-green-500/10 text-green-500 border-green-500/20',
+                      email.send_status === 'failed' && 'bg-red-500/10 text-red-500 border-red-500/20',
+                      email.send_status === 'sending' && 'bg-blue-500/10 text-blue-500 border-blue-500/20',
+                      email.send_status === 'skipped' && 'bg-gray-500/10 text-gray-500 border-gray-500/20',
+                      email.send_status === 'pending' && 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20'
+                    )}
+                  >
+                    {email.send_status === 'sent' && '✓ Sent'}
+                    {email.send_status === 'failed' && '✗ Failed'}
+                    {email.send_status === 'sending' && '⟳ Sending...'}
+                    {email.send_status === 'skipped' && '⊘ Skipped'}
+                    {email.send_status === 'pending' && '○ Pending'}
+                  </Badge>
+                )}
+
                 {/* Quality Score */}
                 {qualityBadge && (
                   <Badge
@@ -250,6 +275,19 @@ export function EmailPreviewCard({
                 {highlightPersonalization(email.body)}
               </div>
             </div>
+
+            {/* Send Error */}
+            {email.send_error && (
+              <div className="mt-3 p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="h-4 w-4 text-red-500 flex-shrink-0 mt-0.5" />
+                  <div className="text-xs text-red-700 dark:text-red-300">
+                    <p className="font-medium mb-1">Send Error:</p>
+                    <p>{email.send_error}</p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Quality Tips */}
             {email.quality_score && email.quality_score < 60 && (

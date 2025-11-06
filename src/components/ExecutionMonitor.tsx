@@ -167,7 +167,14 @@ export const ExecutionMonitor = ({ executionId }: ExecutionMonitorProps) => {
               </div>
               <div>
                 <p className="text-2xl font-bold text-foreground">{emails.length}</p>
-                <p className="text-xs text-muted-foreground">Emails Generated</p>
+                <p className="text-xs text-muted-foreground">
+                  Emails Generated
+                  {emails.filter(e => e.send_status === 'sent').length > 0 && (
+                    <span className="text-success ml-1">
+                      ({emails.filter(e => e.send_status === 'sent').length} sent)
+                    </span>
+                  )}
+                </p>
               </div>
             </div>
           </CardContent>
