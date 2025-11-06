@@ -91,7 +91,7 @@ const ConversationView = () => {
       const decoder = new TextDecoder();
       let textBuffer = '';
       let streamedContent = '';
-      let accumulatedToolCalls: any[] = [];
+      let accumulatedToolCalls: Map<number, any> = new Map();
 
       while (true) {
         const { done, value } = await reader.read();
@@ -128,8 +128,28 @@ const ConversationView = () => {
               });
             }
 
-            if (newToolCalls) {
-              accumulatedToolCalls = newToolCalls;
+            if (newToolCalls && Array.isArray(newToolCalls)) {
+              for (const toolCall of newToolCalls) {
+                const index = toolCall.index;
+                if (!accumulatedToolCalls.has(index)) {
+                  accumulatedToolCalls.set(index, {
+                    id: toolCall.id || '',
+                    type: toolCall.type || 'function',
+                    function: {
+                      name: toolCall.function?.name || '',
+                      arguments: toolCall.function?.arguments || ''
+                    }
+                  });
+                } else {
+                  const existing = accumulatedToolCalls.get(index);
+                  if (toolCall.id) existing.id = toolCall.id;
+                  if (toolCall.type) existing.type = toolCall.type;
+                  if (toolCall.function?.name) existing.function.name = toolCall.function.name;
+                  if (toolCall.function?.arguments) {
+                    existing.function.arguments += toolCall.function.arguments;
+                  }
+                }
+              }
             }
           } catch {
             // Incomplete JSON, put it back
@@ -145,8 +165,9 @@ const ConversationView = () => {
       }
 
       // Handle tool calls
-      if (accumulatedToolCalls && accumulatedToolCalls.length > 0) {
-        for (const toolCall of accumulatedToolCalls) {
+      const toolCallsArray = Array.from(accumulatedToolCalls.values());
+      if (toolCallsArray.length > 0) {
+        for (const toolCall of toolCallsArray) {
           if (toolCall.function?.name === 'create_campaign') {
             try {
               const config = JSON.parse(toolCall.function.arguments);
