@@ -19,6 +19,7 @@ export const ExecuteWorkflowSchema = z.object({
     .max(25, 'Test runs limited to 25 prospects')
     .optional(),
   skip_sending: z.boolean().optional(),
+  enrich_emails: z.boolean().optional(),
 });
 
 /**

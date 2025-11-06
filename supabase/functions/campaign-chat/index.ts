@@ -134,6 +134,42 @@ Use add_email_template tool to create templates with these components:
 - call_to_action: What action to request
 - tone_guidelines: Tone and style instructions
 
+EDITING CAMPAIGNS:
+When users want to edit campaign details, use these patterns:
+
+Natural Language → Action:
+- "Change the tone to professional" → update_campaign with tone: "professional"
+- "Update target to CTOs in NYC" → update_campaign with target_criteria: { job_titles: ["CTO"], location: "NYC" }
+- "Make it run twice a day" → update_campaign with frequency_config: { type: "daily", batch_size: 50 }
+- "Pause the campaign" → update_campaign with status: "paused"
+- "Change the goal to booking demos" → update_campaign with goal: "demo"
+- "Update the instructions to mention our new product" → update_campaign with custom_prompt: "..."
+
+FINDING CAMPAIGN TO EDIT:
+Look back in the conversation for:
+1. Most recent "Created campaign" message with ID
+2. Check for workflow_id that links to a campaign
+3. Extract campaign_id or workflow_id from conversation history
+
+You can edit EVERYTHING about a campaign through chat. Always confirm what you changed.
+
+CLADO INTEGRATION:
+When creating workflows/campaigns, understand these target criteria patterns:
+
+User says → target_criteria:
+- "CTOs in San Francisco" → { job_titles: ["CTO"], location: "San Francisco" }
+- "founders at Y Combinator companies" → { job_titles: ["Founder", "Co-Founder"], companies: ["Y Combinator portfolio"] }
+- "software engineers at FAANG" → { job_titles: ["Software Engineer"], companies: ["Google", "Meta", "Amazon", "Apple", "Netflix"] }
+- "marketing directors in healthcare" → { job_titles: ["Marketing Director"], industry: "healthcare" }
+
+Clado will automatically:
+1. Find LinkedIn profiles matching the criteria using natural language search
+2. Enrich with email addresses (when enabled - costs 4 credits per email)
+3. Return full profile data (experience, education, skills, posts)
+
+If user asks about prospects without emails, suggest:
+"I'll enable email enrichment through Clado - this costs 4 credits per email found but significantly improves deliverability."
+
 WORKFLOW:
 1. If user provides target audience, ask about their goal
 2. Once you have target + goal, CREATE immediately using the appropriate tool
@@ -397,6 +433,65 @@ Be direct and action-oriented. Don't ask unnecessary questions.`
                   }
                 },
                 required: ["template_id", "updates"]
+              }
+            }
+          },
+          {
+            type: "function",
+            function: {
+              name: "update_campaign",
+              description: "Update campaign settings when user wants to change campaign details, schedule, or status. CRITICAL: Look back through the conversation to find the campaign_id from the most recent 'Created campaign' message that shows an ID.",
+              parameters: {
+                type: "object",
+                properties: {
+                  campaign_id: {
+                    type: "string",
+                    description: "Campaign UUID (find from conversation history)"
+                  },
+                  updates: {
+                    type: "object",
+                    description: "Fields to update",
+                    properties: {
+                      name: { type: "string", description: "Campaign name" },
+                      status: {
+                        type: "string",
+                        enum: ["draft", "active", "paused", "completed"],
+                        description: "Campaign status"
+                      },
+                      target_criteria: {
+                        type: "object",
+                        description: "Target audience criteria"
+                      },
+                      tone: {
+                        type: "string",
+                        enum: ["professional", "casual"],
+                        description: "Email tone"
+                      },
+                      goal: {
+                        type: "string",
+                        enum: ["meeting", "demo", "call", "information"],
+                        description: "Campaign goal"
+                      },
+                      custom_prompt: {
+                        type: "string",
+                        description: "Additional email generation instructions"
+                      },
+                      frequency_config: {
+                        type: "object",
+                        description: "Schedule configuration",
+                        properties: {
+                          type: {
+                            type: "string",
+                            enum: ["daily", "weekly", "monthly"]
+                          },
+                          time: { type: "string" },
+                          batch_size: { type: "number" }
+                        }
+                      }
+                    }
+                  }
+                },
+                required: ["campaign_id", "updates"]
               }
             }
           },

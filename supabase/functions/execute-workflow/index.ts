@@ -93,17 +93,19 @@ serve(async (req) => {
 
     // Parse and validate request body
     const requestBody = await req.json();
-    const { workflow_id, campaign_id, execution_id, max_prospects, skip_sending } = validateInput(ExecuteWorkflowSchema, requestBody);
+    const { workflow_id, campaign_id, execution_id, max_prospects, skip_sending, enrich_emails } = validateInput(ExecuteWorkflowSchema, requestBody);
 
     // Set defaults and clamp max_prospects
     const limit = Math.max(1, Math.min(25, max_prospects || 5));
     const shouldSkipSending = skip_sending !== undefined ? skip_sending : true;
+    const shouldEnrichEmails = enrich_emails !== undefined ? enrich_emails : false;
 
     console.log('Starting workflow execution:', { 
       workflow_id, 
       execution_id, 
       max_prospects: limit,
-      skip_sending: shouldSkipSending 
+      skip_sending: shouldSkipSending,
+      enrich_emails: shouldEnrichEmails
     });
 
     // Get workflow details
@@ -437,6 +439,51 @@ serve(async (req) => {
       .from('workflow_executions')
       .update({ total_prospects: prospects.length, prospects_found: prospects.length })
       .eq('id', execution_id);
+
+    // Email enrichment step (if enabled)
+    if (shouldEnrichEmails && prospects.length > 0) {
+      await updateExecutionLog(supabase, execution_id, `[2.5/3] 📧 Enriching ${prospects.length} prospects with emails...`);
+      const enrichStartTime = Date.now();
+      let enrichedCount = 0;
+
+      for (let i = 0; i < prospects.length; i++) {
+        const prospect = prospects[i];
+        
+        if (prospect.linkedin_url && !prospect.email) {
+          try {
+            const enrichUrl = `https://search.clado.ai/api/enrich/contacts?linkedin_url=${encodeURIComponent(prospect.linkedin_url)}&email_enrichment=true`;
+            
+            const enrichResponse = await fetch(enrichUrl, {
+              method: 'GET',
+              headers: {
+                'Authorization': `Bearer ${settings.clado_api_key}`,
+                'Content-Type': 'application/json'
+              }
+            });
+
+            if (enrichResponse.ok) {
+              const enrichData = await enrichResponse.json();
+              const email = enrichData.data?.work_email || enrichData.data?.personal_email;
+              
+              if (email) {
+                prospects[i].email = email;
+                enrichedCount++;
+                console.log(`Enriched email for ${prospect.name}: ${email}`);
+              }
+            }
+          } catch (error) {
+            console.error(`Email enrichment failed for ${prospect.name}:`, error);
+          }
+        }
+      }
+
+      const enrichDuration = ((Date.now() - enrichStartTime) / 1000).toFixed(1);
+      await updateExecutionLog(
+        supabase, 
+        execution_id, 
+        `[2.5/3] ✅ Email enrichment complete: ${enrichedCount}/${prospects.length} emails found (${enrichDuration}s, ${enrichedCount * 4} credits used)`
+      );
+    }
 
     await updateExecutionLog(supabase, execution_id, `[3/3] 📧 OpenAI: Generating emails for ${prospects.length} prospects...`);
 

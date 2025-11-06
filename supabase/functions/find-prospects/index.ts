@@ -41,35 +41,54 @@ serve(async (req) => {
       );
     }
 
-    // Call Clado API (example - adjust based on actual API)
-    const cladoResponse = await fetch('https://api.clado.ai/v1/search', {
-      method: 'POST',
+    // Build natural language query from target criteria
+    const queryParts: string[] = [];
+    
+    if (target_criteria.job_titles?.length) {
+      queryParts.push(target_criteria.job_titles.join(' or '));
+    }
+    
+    if (target_criteria.companies?.length) {
+      queryParts.push(`at ${target_criteria.companies.join(' or ')}`);
+    }
+    
+    if (target_criteria.location) {
+      queryParts.push(`in ${target_criteria.location}`);
+    }
+    
+    if (target_criteria.industry) {
+      queryParts.push(`in ${target_criteria.industry} industry`);
+    }
+    
+    const query = queryParts.join(' ') || 'professionals';
+    const searchUrl = `https://search.clado.ai/api/search?query=${encodeURIComponent(query)}&limit=100&advanced_filtering=true`;
+    
+    console.log('Clado search:', query);
+
+    // Call new Clado Search API
+    const cladoResponse = await fetch(searchUrl, {
+      method: 'GET',
       headers: {
         'Authorization': `Bearer ${settings.clado_api_key}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        industry: target_criteria.industry,
-        location: target_criteria.location,
-        job_titles: target_criteria.job_titles,
-        limit: 100,
-      }),
     });
 
     if (!cladoResponse.ok) {
-      throw new Error(`Clado API error: ${cladoResponse.statusText}`);
+      const errorText = await cladoResponse.text();
+      throw new Error(`Clado API error (${cladoResponse.status}): ${errorText}`);
     }
 
-    const prospects = await cladoResponse.json();
+    const cladoData = await cladoResponse.json();
 
-    // Return normalized prospects array (don't insert here - let execute-campaign handle it)
-    const normalizedProspects = prospects.results?.map((p: any) => ({
-      name: p.name || 'Unknown',
-      email: p.email || '',
-      title: p.title || '',
-      company: p.company || '',
-      linkedin_url: p.linkedin_url || '',
-    })) || [];
+    // Parse new response format
+    const normalizedProspects = (cladoData.results || []).map((result: any) => ({
+      name: result.profile?.name || 'Unknown',
+      email: '', // Will be enriched separately if requested
+      title: result.experience?.[0]?.title || '',
+      company: result.experience?.[0]?.company_name || '',
+      linkedin_url: result.profile?.linkedin_url || '',
+    }));
 
     console.log(`Found ${normalizedProspects.length} prospects from Clado`);
 

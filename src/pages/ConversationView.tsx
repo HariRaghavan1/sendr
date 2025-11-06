@@ -562,7 +562,47 @@ try {
           } else if (toolCall.function?.name === 'update_workflow') {
             try {
               const { workflow_id, updates } = JSON.parse(toolCall.function.arguments);
+              const { data: { user } } = await supabase.auth.getUser();
+              if (!user) throw new Error('Not authenticated');
+
+              // Update workflow in database
+              const { error: workflowError } = await supabase
+                .from('workflows')
+                .update({
+                  name: updates.name,
+                  description: updates.description,
+                  workflow_config: updates,
+                  instructions: updates.instructions,
+                  schedule_config: updates.schedule
+                })
+                .eq('id', workflow_id)
+                .eq('user_id', user.id);
+
+              if (workflowError) throw workflowError;
+
+              // Update linked campaign
+              const { data: conversation } = await supabase
+                .from('campaign_conversations')
+                .select('campaign_id')
+                .eq('id', convId)
+                .single();
+
+              if (conversation?.campaign_id) {
+                await supabase
+                  .from('campaigns')
+                  .update({
+                    name: updates.name,
+                    target_criteria: updates.target_criteria,
+                    tone: updates.tone,
+                    goal: updates.goal,
+                    custom_prompt: updates.instructions,
+                    frequency_config: updates.schedule
+                  })
+                  .eq('id', conversation.campaign_id)
+                  .eq('user_id', user.id);
+              }
               
+              // Update UI
               setMessages(prev => {
                 const updated = [...prev];
                 for (let i = updated.length - 1; i >= 0; i--) {
@@ -582,8 +622,93 @@ try {
                 }
                 return updated;
               });
-            } catch (error) {
+
+              toast({
+                title: "Campaign updated",
+                description: "Changes saved successfully.",
+              });
+
+              finalAssistantContent = `Updated campaign: ${Object.keys(updates).join(", ")}`;
+            } catch (error: any) {
               console.error('Error updating workflow:', error);
+              toast({
+                title: "Error updating campaign",
+                description: error.message,
+                variant: "destructive",
+              });
+            }
+          } else if (toolCall.function?.name === 'update_campaign') {
+            try {
+              const { campaign_id, updates } = JSON.parse(toolCall.function.arguments);
+              const { data: { user } } = await supabase.auth.getUser();
+              if (!user) throw new Error('Not authenticated');
+
+              // Update campaign in database
+              const { error: campaignError } = await supabase
+                .from('campaigns')
+                .update({
+                  ...updates,
+                  updated_at: new Date().toISOString()
+                })
+                .eq('id', campaign_id)
+                .eq('user_id', user.id);
+
+              if (campaignError) throw campaignError;
+
+              // Update linked workflow if exists
+              const { data: workflow } = await supabase
+                .from('workflows')
+                .select('id')
+                .eq('conversation_id', convId)
+                .single();
+
+              if (workflow) {
+                await supabase
+                  .from('workflows')
+                  .update({
+                    name: updates.name,
+                    workflow_config: { ...updates },
+                    instructions: updates.custom_prompt,
+                    schedule_config: updates.frequency_config
+                  })
+                  .eq('id', workflow.id)
+                  .eq('user_id', user.id);
+
+                // Update workflow card in UI
+                setMessages(prev => {
+                  const updated = [...prev];
+                  for (let i = updated.length - 1; i >= 0; i--) {
+                    if (updated[i].metadata?.type === 'workflow' && updated[i].metadata?.workflowId === workflow.id) {
+                      updated[i] = {
+                        ...updated[i],
+                        metadata: {
+                          ...updated[i].metadata,
+                          workflowData: {
+                            ...updated[i].metadata!.workflowData,
+                            ...updates
+                          }
+                        }
+                      };
+                      break;
+                    }
+                  }
+                  return updated;
+                });
+              }
+
+              toast({
+                title: "Campaign updated",
+                description: `Updated: ${Object.keys(updates).join(", ")}`,
+              });
+
+              finalAssistantContent = `Campaign updated successfully: ${Object.keys(updates).join(", ")}`;
+            } catch (error: any) {
+              console.error('Error updating campaign:', error);
+              toast({
+                title: "Error updating campaign",
+                description: error.message,
+                variant: "destructive",
+              });
             }
           }
         }

@@ -18,6 +18,7 @@ interface TestRunDialogProps {
 export const TestRunDialog = ({ open, onOpenChange, campaignId }: TestRunDialogProps) => {
   const [maxProspects, setMaxProspects] = useState(5);
   const [skipSending, setSkipSending] = useState(false);
+  const [enrichEmails, setEnrichEmails] = useState(true);
   const [useTemplate, setUseTemplate] = useState(true);
   const [emailSubject, setEmailSubject] = useState('');
   const [emailBody, setEmailBody] = useState('');
@@ -44,6 +45,7 @@ export const TestRunDialog = ({ open, onOpenChange, campaignId }: TestRunDialogP
           execution_type: 'test',
           max_prospects: maxProspects,
           skip_sending: skipSending,
+          enrich_emails: enrichEmails,
           email_template: useTemplate ? {
             subject: emailSubject,
             body: emailBody,
@@ -86,6 +88,7 @@ export const TestRunDialog = ({ open, onOpenChange, campaignId }: TestRunDialogP
     setExecutionId(null);
     setMaxProspects(5);
     setSkipSending(false);
+    setEnrichEmails(true);
     setUseTemplate(true);
     setEmailSubject('');
     setEmailBody('');
@@ -164,18 +167,34 @@ export const TestRunDialog = ({ open, onOpenChange, campaignId }: TestRunDialogP
               )}
             </div>
 
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                id="skip-sending"
-                checked={skipSending}
-                onCheckedChange={(checked) => setSkipSending(checked as boolean)}
-              />
-              <Label
-                htmlFor="skip-sending"
-                className="text-sm font-normal cursor-pointer"
-              >
-                Skip actual email sending (dry run)
-              </Label>
+            <div className="space-y-3">
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="enrich-emails"
+                  checked={enrichEmails}
+                  onCheckedChange={(checked) => setEnrichEmails(checked as boolean)}
+                />
+                <Label
+                  htmlFor="enrich-emails"
+                  className="text-sm font-normal cursor-pointer"
+                >
+                  Enrich prospects with emails (4 credits per email)
+                </Label>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="skip-sending"
+                  checked={skipSending}
+                  onCheckedChange={(checked) => setSkipSending(checked as boolean)}
+                />
+                <Label
+                  htmlFor="skip-sending"
+                  className="text-sm font-normal cursor-pointer"
+                >
+                  Skip actual email sending (dry run)
+                </Label>
+              </div>
             </div>
 
             <div className="flex justify-end gap-2">
