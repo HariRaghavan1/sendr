@@ -53,9 +53,75 @@ serve(async (req) => {
     }
 
     // Send via Composio using GMAIL_SEND_EMAIL action
-    // Note: Users must first connect their Gmail account via Composio dashboard at app.composio.dev
-    // and configure an entity_id for multi-user support
+    // Use connectedAccountId if available, otherwise fall back to entityId
     console.log(`Sending email to ${email.prospects.email} via Composio...`);
+    
+    // Get connected account ID from settings if available
+    const { data: settingsWithAccount } = await supabaseClient
+      .from('user_settings')
+      .select('composio_connected_account_id, composio_api_key')
+      .eq('user_id', user.id)
+      .single();
+    
+    // Check if saved ID is a valid UUID
+    let connectedAccountId = settingsWithAccount?.composio_connected_account_id;
+    const isSavedIdValid = connectedAccountId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(connectedAccountId);
+    
+    // If saved ID is not a valid UUID, search for the connection
+    if (!isSavedIdValid && settingsWithAccount?.composio_api_key) {
+      console.log('Saved connected account ID is not a valid UUID, searching for connection...');
+      
+      try {
+        const listResponse = await fetch(
+          `https://backend.composio.dev/api/v3/connected_accounts?toolkit_slugs=GMAIL`,
+          {
+            headers: {
+              'x-api-key': settingsWithAccount.composio_api_key,
+              'Content-Type': 'application/json',
+            },
+          }
+        );
+        
+        if (listResponse.ok) {
+          const listData = await listResponse.json();
+          const connections = listData.items || listData.data || [];
+          const activeGmail = connections.find((c: any) => 
+            (c.toolkit?.slug?.toLowerCase() === 'gmail' ||
+             c.toolkit?.name?.toLowerCase() === 'gmail') &&
+            c.status === 'ACTIVE'
+          );
+          
+          if (activeGmail?.uuid) {
+            connectedAccountId = activeGmail.uuid;
+            console.log(`✅ Found valid UUID: ${connectedAccountId}`);
+            
+            // Save it for future use
+            await supabaseClient
+              .from('user_settings')
+              .update({ composio_connected_account_id: connectedAccountId })
+              .eq('user_id', user.id);
+          }
+        }
+      } catch (error) {
+        console.error('Error searching for connection:', error);
+      }
+    }
+    
+    const requestBody: any = {
+      input: {
+        recipient_email: email.prospects.email,
+        subject: email.subject,
+        body: email.body + '\n\n---\nUnsubscribe: [unsubscribe link]',
+      },
+    };
+    
+    // Use connectedAccountId if we have a valid UUID
+    if (connectedAccountId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(connectedAccountId)) {
+      requestBody.connectedAccountId = connectedAccountId;
+      console.log(`Using connected account UUID: ${requestBody.connectedAccountId}`);
+    } else {
+      throw new Error('GMAIL_NOT_CONNECTED: No valid Gmail connection found. Please go to Settings and click "Test Gmail Connection" to verify your connection.');
+    }
     
     const composioResponse = await fetch('https://backend.composio.dev/api/v2/actions/GMAIL_SEND_EMAIL/execute', {
       method: 'POST',
@@ -63,14 +129,7 @@ serve(async (req) => {
         'X-API-Key': settings.composio_api_key,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        entityId: user.id, // Using user ID as entity ID - users must connect Gmail first
-        input: {
-          recipient_email: email.prospects.email,
-          subject: email.subject,
-          body: email.body + '\n\n---\nUnsubscribe: [unsubscribe link]',
-        },
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     if (!composioResponse.ok) {

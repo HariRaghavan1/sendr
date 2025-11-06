@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { MessageSquare, LogOut, LayoutGrid, Settings as SettingsIcon } from "lucide-react";
+import { MessageSquare, LogOut, LayoutGrid, Settings as SettingsIcon, Mail } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -58,6 +58,14 @@ export function AppSidebar() {
                   <NavLink to="/dashboard" className={({ isActive }) => isActive ? "bg-sidebar-accent" : ""}>
                     <LayoutGrid className="h-4 w-4" />
                     {!collapsed && <span>Dashboard</span>}
+                  </NavLink>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild>
+                  <NavLink to="/test-email" className={({ isActive }) => isActive ? "bg-sidebar-accent" : ""}>
+                    <Mail className="h-4 w-4" />
+                    {!collapsed && <span>Test Email</span>}
                   </NavLink>
                 </SidebarMenuButton>
               </SidebarMenuItem>

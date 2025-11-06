@@ -12,7 +12,8 @@ serve(async (req) => {
   }
 
   try {
-    const { campaign_id, target_criteria } = await req.json();
+    const requestBody = await req.json();
+    const { campaign_id, target_criteria, enrich_contacts, initiate_deep_research, limit } = requestBody;
     
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
@@ -41,56 +42,35 @@ serve(async (req) => {
       );
     }
 
-    // Build natural language query from target criteria
-    const queryParts: string[] = [];
+    // Import Clado helpers
+    const { searchCladoProspects } = await import('../_shared/clado-helpers.ts');
     
-    if (target_criteria.job_titles?.length) {
-      queryParts.push(target_criteria.job_titles.join(' or '));
-    }
-    
-    if (target_criteria.companies?.length) {
-      queryParts.push(`at ${target_criteria.companies.join(' or ')}`);
-    }
-    
-    if (target_criteria.location) {
-      queryParts.push(`in ${target_criteria.location}`);
-    }
-    
-    if (target_criteria.industry) {
-      queryParts.push(`in ${target_criteria.industry} industry`);
-    }
-    
-    const query = queryParts.join(' ') || 'professionals';
-    const searchUrl = `https://search.clado.ai/api/search?query=${encodeURIComponent(query)}&limit=100&advanced_filtering=true`;
-    
-    console.log('Clado search:', query);
-
-    // Call new Clado Search API
-    const cladoResponse = await fetch(searchUrl, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${settings.clado_api_key}`,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!cladoResponse.ok) {
-      const errorText = await cladoResponse.text();
-      throw new Error(`Clado API error (${cladoResponse.status}): ${errorText}`);
-    }
-
-    const cladoData = await cladoResponse.json();
-
-    // Parse new response format
-    const normalizedProspects = (cladoData.results || []).map((result: any) => ({
-      name: result.profile?.name || 'Unknown',
-      email: '', // Will be enriched separately if requested
-      title: result.experience?.[0]?.title || '',
-      company: result.experience?.[0]?.company_name || '',
-      linkedin_url: result.profile?.linkedin_url || '',
-    }));
+    // Search for prospects with deep research and contact enrichment
+    const normalizedProspects = await searchCladoProspects(
+      target_criteria,
+      settings.clado_api_key,
+      {
+        limit: limit || 100,
+        advanced_filtering: true,
+        companies: target_criteria.companies,
+        initiateDeepResearch: initiate_deep_research !== false, // Default to true
+        enrichContacts: enrich_contacts !== false, // Default to true
+      }
+    );
 
     console.log(`Found ${normalizedProspects.length} prospects from Clado`);
+    
+    // Log deep research job IDs if available
+    const deepResearchJobIds = [...new Set(normalizedProspects.map(p => p.deep_research_job_id).filter(Boolean))];
+    if (deepResearchJobIds.length > 0) {
+      console.log(`Deep research jobs initiated: ${deepResearchJobIds.join(', ')}`);
+    }
+    
+    // Log contact enrichment stats
+    const enrichedCount = normalizedProspects.filter(p => p.email || p.phone).length;
+    const emailCount = normalizedProspects.filter(p => p.email).length;
+    const phoneCount = normalizedProspects.filter(p => p.phone).length;
+    console.log(`Contact enrichment: ${enrichedCount}/${normalizedProspects.length} prospects enriched (${emailCount} emails, ${phoneCount} phones)`);
 
     return new Response(
       JSON.stringify({ 

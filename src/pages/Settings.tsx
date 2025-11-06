@@ -14,11 +14,14 @@ export default function Settings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
+  const [checkingCredits, setCheckingCredits] = useState(false);
+  const [cladoCredits, setCladoCredits] = useState<number | null>(null);
   const [userId, setUserId] = useState<string>("");
   
   const [settings, setSettings] = useState({
     clado_api_key: "",
     composio_api_key: "",
+    composio_connected_account_id: "",
   });
 
   const [visibility, setVisibility] = useState({
@@ -49,6 +52,7 @@ export default function Settings() {
       setSettings({
         clado_api_key: data.clado_api_key || "",
         composio_api_key: data.composio_api_key || "",
+        composio_connected_account_id: data.composio_connected_account_id || "",
       });
     } else {
       // No settings row exists yet - create one
@@ -103,6 +107,48 @@ export default function Settings() {
     return settings[key as keyof typeof settings]?.length > 0;
   };
 
+  const checkCladoCredits = async () => {
+    if (!settings.clado_api_key) {
+      toast.error("Please save your Clado API key first");
+      return;
+    }
+
+    setCheckingCredits(true);
+    try {
+      const response = await fetch('https://search.clado.ai/api/credits', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${settings.clado_api_key}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error("Invalid Clado API key. Please check your key.");
+        }
+        throw new Error(`Failed to check credits: ${response.status}`);
+      }
+
+      const data = await response.json();
+      setCladoCredits(data.credits || 0);
+      
+      if (data.credits === 0) {
+        toast.error(`No credits remaining. Please purchase credits at https://www.clado.ai/dashboard`);
+      } else if (data.credits < 10) {
+        toast.warning(`Low credits: ${data.credits} remaining. Consider purchasing more.`);
+      } else {
+        toast.success(`✅ ${data.credits} credits remaining`);
+      }
+    } catch (error: any) {
+      console.error("Credits check failed:", error);
+      toast.error("Failed to check credits: " + (error.message || error));
+      setCladoCredits(null);
+    } finally {
+      setCheckingCredits(false);
+    }
+  };
+
   const testComposioConnection = async () => {
     if (!settings.composio_api_key) {
       toast.error("Please save your Composio API key first");
@@ -111,33 +157,48 @@ export default function Settings() {
 
     setTestingConnection(true);
     try {
-      const response = await fetch(
-        `https://backend.composio.dev/api/v2/connections?entityId=${userId}`,
-        {
-          headers: {
-            'X-API-Key': settings.composio_api_key,
-            'Content-Type': 'application/json',
-          },
+      // Use edge function to avoid CORS issues
+      const { data, error } = await supabase.functions.invoke('test-composio-connection', {
+        body: {},
+      });
+      
+      if (error) {
+        // Check if it's a deployment error
+        if (error.message?.includes('404') || 
+            error.message?.includes('not found') ||
+            error.message?.includes('FunctionsRelayError') ||
+            error.message?.includes('Failed to send')) {
+          throw new Error("Edge function not deployed. Please deploy it in Supabase dashboard or run: supabase functions deploy test-composio-connection");
         }
-      );
-
-      if (!response.ok) {
-        throw new Error(`API returned ${response.status}`);
+        
+        // Check if it's a non-2xx status code error
+        if (error.message?.includes('non-2xx') || error.message?.includes('status code')) {
+          const errorDetails = error.context?.body || error.message;
+          throw new Error(`Connection test failed: ${errorDetails || 'Please check your Composio API key and ensure Gmail is connected.'}`);
+        }
+        
+        throw error;
+      }
+      
+      if (data.error) {
+        const errorMsg = data.details ? `${data.error}: ${data.details}` : data.error;
+        throw new Error(errorMsg);
       }
 
-      const connections = await response.json();
-      const gmailConnected = connections.some((c: any) => 
-        c.appName?.toLowerCase() === 'gmail' || c.integrationId?.toLowerCase().includes('gmail')
-      );
-
-      if (gmailConnected) {
-        toast.success("✅ Gmail is connected and ready to send emails!");
+      if (data.isGmail) {
+        if (data.status === 'ACTIVE') {
+          toast.success("✅ Gmail is connected and ready to send emails!");
+          // Reload settings to get updated connected account ID if it was auto-saved
+          loadSettings();
+        } else {
+          toast.warning(`Gmail account found but status is: ${data.status || 'unknown'}. Please check your Composio dashboard.`);
+        }
       } else {
-        toast.error("❌ Gmail not connected. Follow the setup guide below.");
+        toast.error("❌ Gmail not connected. If you connected via Composio dashboard, make sure you're using the same Composio account as your API key.");
       }
     } catch (error: any) {
       console.error("Connection test failed:", error);
-      toast.error("Failed to test connection: " + error.message);
+      toast.error("Failed to test connection: " + (error.message || error));
     } finally {
       setTestingConnection(false);
     }
@@ -206,6 +267,29 @@ export default function Settings() {
               <p className="text-xs text-muted-foreground">
                 Used for B2B lead discovery. Get your key at <a href="https://clado.ai" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">clado.ai</a>
               </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={checkCladoCredits}
+                  disabled={checkingCredits || !isKeyConfigured("clado_api_key")}
+                  title={!isKeyConfigured("clado_api_key") ? "Save your Clado API key first" : ""}
+                >
+                  {checkingCredits ? "Checking..." : "Check Credits"}
+                </Button>
+                {cladoCredits !== null && (
+                  <span className="text-sm text-muted-foreground">
+                    {cladoCredits === 0 ? (
+                      <span className="text-destructive">No credits remaining</span>
+                    ) : cladoCredits < 10 ? (
+                      <span className="text-yellow-600">⚠️ {cladoCredits} credits remaining</span>
+                    ) : (
+                      <span className="text-green-600">✅ {cladoCredits} credits remaining</span>
+                    )}
+                  </span>
+                )}
+              </div>
             </div>
 
             <Separator />
@@ -238,8 +322,27 @@ export default function Settings() {
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                Used for email sending via Gmail/Outlook. Get your key at <a href="https://app.composio.dev" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">app.composio.dev</a>
+                Used for email sending via Gmail/Outlook. Get your key at <a href="https://platform.composio.dev" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">platform.composio.dev</a>
               </p>
+              
+              {/* Connected Account ID */}
+              {isKeyConfigured("composio_api_key") && (
+                <div className="mt-3 space-y-2">
+                  <Label htmlFor="composio_account_id">Composio Connected Account ID</Label>
+                  <Input
+                    id="composio_account_id"
+                    type="text"
+                    placeholder="ca_CLlDVYpMJpNK"
+                    value={settings.composio_connected_account_id}
+                    onChange={(e) => setSettings({ ...settings, composio_connected_account_id: e.target.value })}
+                    className="text-xs"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    If you connected Gmail via the Composio dashboard, enter your Account ID here (starts with <code className="px-1 py-0.5 bg-muted rounded text-xs">ca_</code>). 
+                    You should have received this when you connected: <code className="px-1 py-0.5 bg-muted rounded text-xs">ca_CLlDVYpMJpNK</code>
+                  </p>
+                </div>
+              )}
               
               {isKeyConfigured("composio_api_key") && (
                 <Button
@@ -258,34 +361,46 @@ export default function Settings() {
                 <ol className="text-xs space-y-2 text-muted-foreground">
                   <li className="flex gap-2">
                     <span className="font-medium text-foreground">1.</span>
-                    <span>Go to <a href="https://app.composio.dev" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline font-medium">app.composio.dev</a></span>
+                    <span>Go to <a href="https://platform.composio.dev" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline font-medium">platform.composio.dev</a> and log in</span>
                   </li>
                   <li className="flex gap-2">
                     <span className="font-medium text-foreground">2.</span>
-                    <span>Navigate to <strong>Connections</strong> → <strong>Add Connection</strong></span>
+                    <span>Navigate to the <a href="https://platform.composio.dev?next_page=/marketplace/Gmail" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Gmail Marketplace page</a></span>
                   </li>
                   <li className="flex gap-2">
                     <span className="font-medium text-foreground">3.</span>
-                    <span>Select <strong>Gmail</strong> integration</span>
+                    <span>Create a <strong>Gmail Auth Config</strong> if you haven't already (click "Create Gmail Auth Config")</span>
                   </li>
                   <li className="flex gap-2">
                     <span className="font-medium text-foreground">4.</span>
+                    <span>Look for options to connect your account. You may see:</span>
+                    <ul className="list-disc list-inside ml-2 mt-1 space-y-1">
+                      <li>"Connect Account" or "Add Connection" button</li>
+                      <li>A "Connected Accounts" section in the dashboard</li>
+                      <li>An "Integrations" or "Apps" section</li>
+                    </ul>
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="font-medium text-foreground">5.</span>
                     <div className="flex-1">
-                      <span>Set <strong>Entity ID</strong> to:</span>
+                      <span>If prompted for <strong>Entity ID</strong>, use:</span>
                       <code className="block mt-1 px-2 py-1 bg-muted rounded text-xs font-mono break-all">
                         {userId || "Loading..."}
                       </code>
                     </div>
                   </li>
                   <li className="flex gap-2">
-                    <span className="font-medium text-foreground">5.</span>
-                    <span>Click <strong>Authorize</strong> and log in with your Gmail account</span>
+                    <span className="font-medium text-foreground">6.</span>
+                    <span>Authorize and log in with your Gmail account</span>
                   </li>
                   <li className="flex gap-2">
-                    <span className="font-medium text-foreground">6.</span>
-                    <span>Return here and click <strong>Test Gmail Connection</strong></span>
+                    <span className="font-medium text-foreground">7.</span>
+                    <span>Return here and click <strong>Test Gmail Connection</strong> to verify</span>
                   </li>
                 </ol>
+                <p className="text-xs text-muted-foreground mt-3 italic">
+                  Note: The Composio dashboard interface may have changed. If you can't find connection options in the UI, the connection may need to be done programmatically via the Composio API using your Entity ID above.
+                </p>
               </div>
             </div>
 

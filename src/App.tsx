@@ -15,6 +15,7 @@ import CampaignEdit from "./pages/CampaignEdit";
 import ConversationView from "./pages/ConversationView";
 import CampaignDetail from "./pages/CampaignDetail";
 import Workflows from "./pages/Workflows";
+import TestEmail from "./pages/TestEmail";
 import NotFound from "./pages/NotFound";
 import { toast } from "sonner";
 
@@ -87,6 +88,7 @@ const App = () => (
             <Route path="/dashboard" element={<ProtectedLayout><Dashboard /></ProtectedLayout>} />
             <Route path="/workflows" element={<ProtectedLayout><Workflows /></ProtectedLayout>} />
             <Route path="/settings" element={<ProtectedLayout><Settings /></ProtectedLayout>} />
+            <Route path="/test-email" element={<ProtectedLayout><TestEmail /></ProtectedLayout>} />
             <Route path="/campaigns/new" element={<ProtectedLayout><CampaignCreate /></ProtectedLayout>} />
             <Route path="/campaigns/:id/edit" element={<ProtectedLayout><CampaignEdit /></ProtectedLayout>} />
             <Route path="/campaigns/ai-create" element={<ProtectedLayout><ConversationView /></ProtectedLayout>} />

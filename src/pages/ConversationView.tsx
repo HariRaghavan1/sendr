@@ -55,7 +55,18 @@ const ConversationView = () => {
         (payload) => {
           const newMessage = payload.new as any;
           setMessages(prev => {
-            if (prev.some((m: any) => m.id === newMessage.id)) return prev;
+            // Check if message already exists by ID or by content+role+timestamp to prevent duplicates
+            const existsById = newMessage.id && prev.some((m: any) => m.id === newMessage.id);
+            if (existsById) return prev;
+            
+            // Also check for content duplicates in recent messages (last 3)
+            const recentMessages = prev.slice(-3);
+            const existsByContent = recentMessages.some((m: any) => 
+              m.role === newMessage.role && 
+              m.content === newMessage.content
+            );
+            if (existsByContent) return prev;
+            
             return [...prev, newMessage];
           });
           
@@ -92,43 +103,81 @@ const ConversationView = () => {
         navigate(`/campaigns/ai-create/${convId}`, { replace: true });
       }
 
-      // Add user message locally
-      const newMessages = [...messages, { role: 'user' as const, content: userMessage }];
-      setMessages(newMessages);
-
-      // Save user message
+      // Save user message to DB first (real-time subscription will add it to UI)
       if (convId) {
-        await saveMessage(convId, 'user', userMessage);
+        const { error } = await supabase
+          .from('conversation_messages')
+          .insert({
+            conversation_id: convId,
+            role: 'user',
+            content: userMessage
+          });
+        
+        if (error) {
+          console.error('Error saving user message:', error);
+          // Fallback: add locally if DB save fails
+          setMessages(prev => [...prev, { role: 'user' as const, content: userMessage }]);
+        }
+      } else {
+        // No conversation yet, add locally
+        setMessages(prev => [...prev, { role: 'user' as const, content: userMessage }]);
       }
 
-      // Add placeholder for streaming assistant message
-      const assistantMessageIndex = newMessages.length;
-      setMessages([...newMessages, { role: 'assistant', content: '' }]);
+      // Wait a moment for real-time subscription to add the user message
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Get current messages state (may have been updated by real-time subscription)
+      // Use a function to get the latest messages state
+      let assistantMessageIndex: number;
+      let currentMessagesForAPI: Message[];
+      
+      setMessages(prev => {
+        assistantMessageIndex = prev.length;
+        currentMessagesForAPI = prev.length > 0 ? prev : [{ role: 'user' as const, content: userMessage }];
+        // Add placeholder for streaming assistant message
+        return [...prev, { role: 'assistant' as const, content: '' }];
+      });
 
       // Stream response from edge function
       const session = await supabase.auth.getSession();
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 
-      const response = await fetch(
-        `${supabaseUrl}/functions/v1/campaign-chat`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session.data.session?.access_token}`,
-          },
-          body: JSON.stringify({
-            messages: newMessages.filter(msg => msg && msg.content != null && msg.content !== '')
-          }),
+      if (!supabaseUrl) {
+        throw new Error('Supabase URL not configured. Please check your environment variables.');
+      }
+
+      let response: Response;
+      try {
+        response = await fetch(
+          `${supabaseUrl}/functions/v1/campaign-chat`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session.data.session?.access_token}`,
+            },
+            body: JSON.stringify({
+              messages: currentMessagesForAPI.filter(msg => msg && msg.content != null && msg.content !== '')
+            }),
+          }
+        );
+      } catch (fetchError: any) {
+        // Network error - function probably not deployed
+        if (fetchError.message?.includes('Failed to fetch') || fetchError.message?.includes('NetworkError')) {
+          throw new Error('Edge function not deployed or unreachable. Please deploy the campaign-chat function in your Supabase dashboard.');
         }
-      );
+        throw fetchError;
+      }
 
       if (!response.ok) {
+        if (response.status === 404) {
+          throw new Error('campaign-chat function not found. Please deploy it in your Supabase dashboard.');
+        }
         if (response.status === 429) {
           throw new Error('Rate limit exceeded. Please try again in a moment.');
         }
         const err = await response.json().catch(() => null);
-        throw new Error(err?.error || 'Failed to get response');
+        throw new Error(err?.error || `Failed to get response (${response.status})`);
       }
 
       if (!response.body) throw new Error('No response body');
@@ -252,6 +301,15 @@ let accumulatedToolCalls: Map<number, any> = new Map();
 
               if (workflowError) throw workflowError;
 
+              // Map tone values: "professional" -> "formal" (database enum only accepts 'formal', 'casual', 'witty')
+              const toneMap: Record<string, 'formal' | 'casual' | 'witty'> = {
+                'professional': 'formal',
+                'formal': 'formal',
+                'casual': 'casual',
+                'witty': 'witty'
+              };
+              const mappedTone = toneMap[config.tone?.toLowerCase()] || 'casual';
+
               // Create the campaign
               const { data: campaign, error: campaignError } = await supabase
                 .from('campaigns')
@@ -259,7 +317,7 @@ let accumulatedToolCalls: Map<number, any> = new Map();
                   user_id: user.id,
                   name: config.name,
                   target_criteria: config.target_criteria,
-                  tone: config.tone,
+                  tone: mappedTone,
                   goal: config.goal,
                   custom_prompt: config.custom_prompt,
                   status: 'draft'
@@ -276,17 +334,29 @@ let accumulatedToolCalls: Map<number, any> = new Map();
                   .eq('id', convId);
               }
 
-              // Set message metadata to display WorkflowCard
+              // Set message metadata to display WorkflowCard with Test Run button
               setMessages(prev => {
                 const updated = [...prev];
-                updated[assistantMessageIndex] = {
-                  ...updated[assistantMessageIndex],
-                  metadata: {
-                    type: 'workflow',
-                    workflowId: workflow.id,
-                    workflowData
-                  }
-                };
+                if (updated[assistantMessageIndex]) {
+                  updated[assistantMessageIndex] = {
+                    ...updated[assistantMessageIndex],
+                    metadata: {
+                      type: 'workflow',
+                      workflowId: workflow.id,
+                      workflowData: {
+                        id: workflow.id,
+                        name: config.name,
+                        description: workflowData.description,
+                        goal: config.goal,
+                        target_criteria: config.target_criteria,
+                        tone: config.tone,
+                        instructions: config.custom_prompt || '',
+                        schedule: workflowData.schedule,
+                        steps: workflowData.steps
+                      }
+                    }
+                  };
+                }
                 return updated;
               });
 
@@ -348,13 +418,22 @@ setMessages(prev => {
 
 // Auto-create a campaign from the workflow so "create it" actually creates it
 try {
+  // Map tone values: "professional" -> "formal" (database enum only accepts 'formal', 'casual', 'witty')
+  const toneMap: Record<string, 'formal' | 'casual' | 'witty'> = {
+    'professional': 'formal',
+    'formal': 'formal',
+    'casual': 'casual',
+    'witty': 'witty'
+  };
+  const mappedTone = toneMap[workflowData.tone?.toLowerCase()] || 'casual';
+
   const { data: campaign, error: campaignError } = await supabase
     .from('campaigns')
     .insert({
       user_id: user.id,
       name: workflowData.name,
       target_criteria: workflowData.target_criteria,
-      tone: workflowData.tone || 'casual',
+      tone: mappedTone,
       goal: workflowData.goal,
       custom_prompt: workflowData.instructions,
       frequency_config: workflowData.schedule || { frequency: 'daily', time: '09:00', batch_size: 25 },
@@ -388,68 +467,278 @@ try {
             }
           } else if (toolCall.function?.name === 'run_test') {
             try {
+              // Ensure we have a conversation ID - create one if needed
+              let convId = currentConvId;
+              if (!convId) {
+                console.log('No conversation ID found, creating new conversation...');
+                const { data: { user } } = await supabase.auth.getUser();
+                if (!user) throw new Error('Not authenticated');
+                
+                // Get the first user message to use as title, or use default
+                const firstUserMessage = messages.find(m => m.role === 'user')?.content;
+                // Ensure we have a valid string for the title
+                const titleMessage = (firstUserMessage && typeof firstUserMessage === 'string' && firstUserMessage.trim()) 
+                  ? firstUserMessage.trim() 
+                  : 'New Campaign Test Run';
+                const newConvId = await createConversation(titleMessage);
+                if (newConvId) {
+                  convId = newConvId;
+                  setCurrentConvId(convId);
+                  console.log('Created new conversation:', convId);
+                } else {
+                  throw new Error('Failed to create conversation');
+                }
+              }
+              
+              // Check if there's already a running execution in this conversation
+              // Only skip if execution is actually still running (not completed/failed)
+              const existingExecution = messages.find(m => 
+                m && m.metadata?.type === 'execution' && 
+                m.metadata?.executionId
+              );
+              
+              if (existingExecution) {
+                // Check execution status in DB to see if it's still running
+                try {
+                  const { data: exec } = await supabase
+                    .from('workflow_executions')
+                    .select('status')
+                    .eq('id', existingExecution.metadata?.executionId)
+                    .single();
+                  
+                  // Only skip if execution is still running
+                  if (exec && (exec.status === 'running' || exec.status === 'pending')) {
+                    console.log('Execution already running in conversation, skipping duplicate');
+                    finalAssistantContent = 'A test run is already in progress. Please wait for it to complete.';
+                    return;
+                  }
+                } catch (e) {
+                  // If we can't check status, proceed anyway (execution might have been deleted)
+                  console.log('Could not check execution status, proceeding with new execution');
+                }
+              }
+              
               const params = JSON.parse(toolCall.function.arguments);
-              let { workflow_id, max_prospects = 5, skip_sending = true } = params;
+              let { workflow_id, max_prospects = 5, skip_sending = true, enrich_emails = false, send_drafts_to_email } = params;
               
               // Clamp max_prospects between 1 and 25
               max_prospects = Math.max(1, Math.min(25, max_prospects));
               
+              // Log what parameters we received
+              console.log('Test run parameters:', {
+                workflow_id,
+                max_prospects,
+                skip_sending,
+                enrich_emails,
+                send_drafts_to_email
+              });
+              
               const { data: { user } } = await supabase.auth.getUser();
               if (!user) throw new Error('Not authenticated');
+              
+              // For test runs, ALWAYS default to sending drafts to hariraghavan2023@gmail.com
+              // This ensures drafts are always sent for review, regardless of skip_sending flag
+              // skip_sending only affects sending to prospects, not the summary email
+              if (!send_drafts_to_email || send_drafts_to_email === null || send_drafts_to_email === undefined || send_drafts_to_email === '') {
+                send_drafts_to_email = 'hariraghavan2023@gmail.com';
+                console.log(`No send_drafts_to_email specified, defaulting to: ${send_drafts_to_email}`);
+              }
+              
+              console.log(`Final send_drafts_to_email value: "${send_drafts_to_email}"`);
 
-              // Validate workflow_id is a UUID, if not try to look it up by name
               const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
               
-              if (!uuidRegex.test(workflow_id)) {
-                console.log('Workflow ID is not a UUID, attempting lookup by name:', workflow_id);
-                // Try to find workflow by name
-                const { data: foundWorkflow, error: lookupError } = await supabase
-                  .from('workflows')
-                  .select('id')
-                  .eq('user_id', user.id)
-                  .eq('name', workflow_id)
-                  .order('created_at', { ascending: false })
-                  .limit(1)
-                  .maybeSingle();
-
-                if (lookupError || !foundWorkflow) {
-                  throw new Error(`Workflow not found with name: "${workflow_id}". Please use the workflow ID instead.`);
+              // If workflow_id is missing or not a UUID, try to find it from conversation
+              if (!workflow_id || !uuidRegex.test(workflow_id)) {
+                console.log('Workflow ID missing or invalid, attempting to find from conversation...');
+                
+                // First, try to find workflow from conversation_id
+                if (convId) {
+                  const { data: workflowFromConv, error: convWorkflowError } = await supabase
+                    .from('workflows')
+                    .select('id, name')
+                    .eq('conversation_id', convId)
+                    .eq('user_id', user.id)
+                    .order('created_at', { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+                  
+                  if (!convWorkflowError && workflowFromConv) {
+                    workflow_id = workflowFromConv.id;
+                    console.log(`Found workflow from conversation: ${workflowFromConv.name} (${workflow_id})`);
+                  }
                 }
                 
-                workflow_id = foundWorkflow.id;
-                console.log('Found workflow ID:', workflow_id);
+                // If still not found, try to find by name (if workflow_id was provided as a name)
+                if ((!workflow_id || !uuidRegex.test(workflow_id)) && params.workflow_id) {
+                  console.log('Workflow ID is not a UUID, attempting lookup by name:', params.workflow_id);
+                  const { data: foundWorkflow, error: lookupError } = await supabase
+                    .from('workflows')
+                    .select('id')
+                    .eq('user_id', user.id)
+                    .eq('name', params.workflow_id)
+                    .order('created_at', { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+
+                  if (!lookupError && foundWorkflow) {
+                    workflow_id = foundWorkflow.id;
+                    console.log('Found workflow ID by name:', workflow_id);
+                  }
+                }
+                
+                // If still not found, try to find the most recent workflow for this user
+                if (!workflow_id || !uuidRegex.test(workflow_id)) {
+                  console.log('Attempting to find most recent workflow for user...');
+                  const { data: recentWorkflow, error: recentError } = await supabase
+                    .from('workflows')
+                    .select('id, name')
+                    .eq('user_id', user.id)
+                    .order('created_at', { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+                  
+                  if (!recentError && recentWorkflow) {
+                    workflow_id = recentWorkflow.id;
+                    console.log(`Using most recent workflow: ${recentWorkflow.name} (${workflow_id})`);
+                  }
+                }
+                
+                // If still no workflow found, auto-create one
+                if (!workflow_id || !uuidRegex.test(workflow_id)) {
+                  console.log('No workflow found, auto-creating default workflow...');
+                  
+                  // Get conversation title for workflow name
+                  let workflowName = 'Test Workflow';
+                  if (convId) {
+                    const { data: conversation } = await supabase
+                      .from('campaign_conversations')
+                      .select('title')
+                      .eq('id', convId)
+                      .single();
+                    
+                    if (conversation?.title) {
+                      workflowName = conversation.title.substring(0, 50);
+                    }
+                  }
+
+                  // Create default workflow with better default criteria
+                  const { data: newWorkflow, error: createError } = await supabase
+                    .from('workflows')
+                    .insert({
+                      user_id: user.id,
+                      conversation_id: convId || null,
+                      name: workflowName,
+                      description: 'Auto-created workflow for test run',
+                      workflow_config: {
+                        target_criteria: { 
+                          job_titles: ['Software Engineer', 'Product Manager', 'Marketing Manager', 'Sales Manager', 'Data Scientist']
+                        },
+                        tone: 'casual',
+                        goal: 'meeting'
+                      },
+                      instructions: 'Generate personalized cold emails',
+                      schedule_config: { frequency: 'daily', time: '09:00', batch_size: 25 },
+                      status: 'draft'
+                    })
+                    .select()
+                    .single();
+
+                  if (createError || !newWorkflow) {
+                    console.error('Failed to auto-create workflow:', createError);
+                    // Don't throw - let backend handle it
+                    workflow_id = undefined;
+                  } else {
+                    workflow_id = newWorkflow.id;
+                    console.log('✅ Auto-created workflow:', workflow_id);
+                  }
+                }
               }
 
-              // Find the campaign_id for this workflow by looking at the conversation
-              const { data: conversation, error: convError } = await supabase
-                .from('campaign_conversations')
-                .select('campaign_id')
-                .eq('id', convId)
-                .single();
+              // Try to find the campaign_id for this workflow by looking at the conversation
+              let campaign_id: string | undefined = undefined;
+              
+              if (convId) {
+                const { data: conversation, error: convError } = await supabase
+                  .from('campaign_conversations')
+                  .select('campaign_id')
+                  .eq('id', convId)
+                  .single();
 
-              if (convError || !conversation?.campaign_id) {
-                throw new Error('Campaign not found for this workflow. Please create the campaign first.');
+                if (!convError && conversation?.campaign_id) {
+                  campaign_id = conversation.campaign_id;
+                  console.log(`Found campaign_id from conversation: ${campaign_id}`);
+                } else if (workflow_id && uuidRegex.test(workflow_id)) {
+                  // Try to find campaign from workflow
+                  const { data: workflow } = await supabase
+                    .from('workflows')
+                    .select('conversation_id')
+                    .eq('id', workflow_id)
+                    .single();
+                  
+                  if (workflow?.conversation_id) {
+                    const { data: conv, error: convError2 } = await supabase
+                      .from('campaign_conversations')
+                      .select('campaign_id')
+                      .eq('id', workflow.conversation_id)
+                      .single();
+                    
+                    if (!convError2 && conv?.campaign_id) {
+                      campaign_id = conv.campaign_id;
+                      console.log(`Found campaign_id from workflow's conversation: ${campaign_id}`);
+                    }
+                  }
+                }
               }
-
-              const campaign_id = conversation.campaign_id;
+              
+              // campaign_id is optional - workflow can run without it
+              console.log(`Running test with workflow_id: ${workflow_id || 'none (will be auto-detected)'}, campaign_id: ${campaign_id || 'none'}`);
 
               // Create workflow execution
+              // Note: workflow_id can be undefined - backend will find it from conversation
+              // Ensure user.id is valid UUID
+              if (!user.id || !uuidRegex.test(user.id)) {
+                throw new Error('Invalid user ID');
+              }
+              
+              const executionData: any = {
+                user_id: user.id,
+                execution_type: 'manual',
+                status: 'running',
+                prospects_found: 0,
+                emails_generated: 0,
+                emails_sent: 0,
+              };
+              
+              // Only include workflow_id if we found a valid one (must be UUID)
+              if (workflow_id && uuidRegex.test(workflow_id)) {
+                executionData.workflow_id = workflow_id;
+              }
+              
+              // Only include campaign_id if we found it (must be UUID)
+              if (campaign_id && uuidRegex.test(campaign_id)) {
+                executionData.campaign_id = campaign_id;
+              }
+              
+              // Note: conversation_id is passed to the edge function in the invoke body,
+              // but not stored in workflow_executions table (it doesn't have that column)
+              
+              console.log('Inserting execution with data:', JSON.stringify(executionData, null, 2));
+              
               const { data: execution, error: execError } = await supabase
                 .from('workflow_executions')
-                .insert({
-                  workflow_id,
-                  campaign_id,
-                  user_id: user.id,
-                  execution_type: 'manual',
-                  status: 'running',
-                  prospects_found: 0,
-                  emails_generated: 0,
-                  emails_sent: 0,
-                })
+                .insert(executionData)
                 .select()
                 .single();
 
-              if (execError) throw execError;
+              if (execError) {
+                console.error('Error creating execution:', execError);
+                console.error('Execution data:', JSON.stringify(executionData, null, 2));
+                console.error('Full error details:', JSON.stringify(execError, null, 2));
+                throw new Error(`Failed to create execution: ${execError.message || execError.details || JSON.stringify(execError)}`);
+              }
+              
+              console.log('✅ Execution created successfully:', execution.id);
 
               // Add ExecutionMonitor to chat
               const execMessage: Message = {
@@ -472,27 +761,50 @@ try {
                 );
               }
 
-              // Trigger execution with campaign_id, max_prospects and skip_sending
-              supabase.functions.invoke('execute-workflow', {
-                body: { 
-                  workflow_id, 
-                  campaign_id,
-                  execution_id: execution.id,
-                  max_prospects,
-                  skip_sending
-                }
-              }).then(({ error }) => {
-                if (error) {
-                  console.error('Error executing workflow:', error);
-                  toast({
-                    title: "Execution Error",
-                    description: error.message,
-                    variant: "destructive",
-                  });
-                }
-              });
+              // Trigger execution with campaign_id, max_prospects, skip_sending, enrich_emails, and send_drafts_to_email
+              const invokeBody = { 
+                workflow_id, 
+                campaign_id,
+                execution_id: execution.id,
+                conversation_id: convId, // Pass conversation_id so backend can find workflow
+                max_prospects,
+                skip_sending,
+                enrich_emails
+              };
+              
+              // ALWAYS include send_drafts_to_email (we default it above if not set)
+              // This ensures the summary email is always sent, even if skip_sending=true
+              invokeBody.send_drafts_to_email = send_drafts_to_email;
+              
+              console.log('Invoking execute-workflow with:', invokeBody);
+              console.log(`✅ send_drafts_to_email is set to: "${invokeBody.send_drafts_to_email}"`);
+              
+              // Invoke execute-workflow with proper error handling
+              try {
+                const { data, error: invokeError } = await supabase.functions.invoke('execute-workflow', {
+                  body: invokeBody
+                });
 
-              finalAssistantContent = `Test run started for ${max_prospects} prospect${max_prospects === 1 ? '' : 's'}. See live progress below.`;
+                if (invokeError) {
+                  console.error('Error executing workflow:', invokeError);
+                  
+                  // Check if it's a deployment error
+                  const isDeploymentError = invokeError.message?.includes('404') || 
+                                           invokeError.message?.includes('not found') ||
+                                           invokeError.message?.includes('FunctionsRelayError');
+                  
+                  throw new Error(isDeploymentError
+                    ? "The execute-workflow function hasn't been deployed to Supabase. Please deploy it using: supabase functions deploy execute-workflow"
+                    : invokeError.message || 'Failed to start workflow execution');
+                }
+
+                console.log('✅ Workflow execution started successfully:', data);
+                
+                finalAssistantContent = `Test run started for ${max_prospects} prospect${max_prospects === 1 ? '' : 's'}. See live progress below.`;
+              } catch (invokeErr: any) {
+                console.error('Error invoking execute-workflow:', invokeErr);
+                throw new Error(invokeErr.message || 'Failed to invoke execute-workflow function');
+              }
             } catch (error: any) {
               console.error('Error starting test run:', error);
               toast({
@@ -747,6 +1059,184 @@ try {
                 variant: "destructive",
               });
             }
+          } else if (toolCall.function?.name === 'set_sender_name') {
+            try {
+              const { name } = JSON.parse(toolCall.function.arguments);
+              const { data: { user } } = await supabase.auth.getUser();
+              if (!user) throw new Error('Not authenticated');
+
+              // Use upsert (same pattern as Settings.tsx) - don't set updated_at manually, trigger handles it
+              const { error: updateError } = await supabase
+                .from('user_settings')
+                .upsert({
+                  user_id: user.id,
+                  sender_name: name
+                }, {
+                  onConflict: 'user_id'
+                });
+
+              if (updateError) {
+                console.error('Error saving sender name:', updateError);
+                throw updateError;
+              }
+
+              toast({
+                title: "✅ Name saved",
+                description: `Your emails will be signed with "${name}"`,
+              });
+
+              finalAssistantContent = `Got it! I've saved "${name}" as your email signature name. Your emails will be signed with this name.`;
+            } catch (error: any) {
+              console.error('Error saving sender name:', error);
+              const errorMessage = error?.message || error?.details || error?.hint || 'Unknown error occurred';
+              toast({
+                title: "Error saving name",
+                description: errorMessage,
+                variant: "destructive",
+              });
+              finalAssistantContent = `Sorry, I encountered an error saving your name: ${errorMessage}`;
+            }
+          } else if (toolCall.function?.name === 'set_email_template') {
+            try {
+              const templateData = JSON.parse(toolCall.function.arguments);
+              const { data: { user } } = await supabase.auth.getUser();
+              if (!user) throw new Error('Not authenticated');
+
+              let workflowId = templateData.workflow_id;
+
+              // Find workflow from conversation if not provided
+              if (!workflowId && convId) {
+                const { data: workflow } = await supabase
+                  .from('workflows')
+                  .select('id')
+                  .eq('conversation_id', convId)
+                  .eq('user_id', user.id)
+                  .order('created_at', { ascending: false })
+                  .limit(1)
+                  .maybeSingle();
+
+                if (workflow) {
+                  workflowId = workflow.id;
+                }
+              }
+
+              // If still no workflow found, try to find most recent workflow
+              if (!workflowId) {
+                const { data: recentWorkflow } = await supabase
+                  .from('workflows')
+                  .select('id')
+                  .eq('user_id', user.id)
+                  .order('created_at', { ascending: false })
+                  .limit(1)
+                  .maybeSingle();
+
+                if (recentWorkflow) {
+                  workflowId = recentWorkflow.id;
+                }
+              }
+
+              // Auto-create workflow if none exists
+              if (!workflowId) {
+                console.log('No workflow found, auto-creating default workflow...');
+                
+                // Get conversation title for workflow name
+                let workflowName = 'Email Campaign';
+                if (convId) {
+                  const { data: conversation } = await supabase
+                    .from('campaign_conversations')
+                    .select('title')
+                    .eq('id', convId)
+                    .single();
+                  
+                  if (conversation?.title) {
+                    workflowName = conversation.title.substring(0, 50);
+                  }
+                }
+
+                // Create default workflow with better default criteria
+                const { data: newWorkflow, error: createError } = await supabase
+                  .from('workflows')
+                  .insert({
+                    user_id: user.id,
+                    conversation_id: convId || null,
+                    name: workflowName,
+                    description: 'Auto-created workflow for email template',
+                    workflow_config: {
+                      target_criteria: { 
+                        job_titles: ['Software Engineer', 'Product Manager', 'Marketing Manager', 'Sales Manager', 'Data Scientist']
+                      },
+                      tone: 'casual',
+                      goal: 'meeting'
+                    },
+                    instructions: 'Generate personalized cold emails',
+                    schedule_config: { frequency: 'daily', time: '09:00', batch_size: 25 },
+                    status: 'draft'
+                  })
+                  .select()
+                  .single();
+
+                if (createError || !newWorkflow) {
+                  throw new Error(`Failed to create workflow: ${createError?.message || 'Unknown error'}`);
+                }
+
+                workflowId = newWorkflow.id;
+                console.log('✅ Auto-created workflow:', workflowId);
+              }
+
+              // Get current workflow config
+              const { data: currentWorkflow, error: fetchError } = await supabase
+                .from('workflows')
+                .select('workflow_config')
+                .eq('id', workflowId)
+                .eq('user_id', user.id)
+                .single();
+
+              if (fetchError) throw fetchError;
+
+              // Update workflow_config with email_template
+              const updatedConfig = {
+                ...(currentWorkflow?.workflow_config || {}),
+                email_template: {
+                  type: templateData.template_type,
+                  template_structure: templateData.template_structure || null,
+                  example_email: templateData.example_email || null,
+                  instructions: templateData.template_instructions || null,
+                  set_at: new Date().toISOString()
+                }
+              };
+
+              // Update workflow
+              const { error: updateError } = await supabase
+                .from('workflows')
+                .update({
+                  workflow_config: updatedConfig,
+                  updated_at: new Date().toISOString()
+                })
+                .eq('id', workflowId)
+                .eq('user_id', user.id);
+
+              if (updateError) throw updateError;
+
+              const templateDescription = templateData.template_type === 'example' 
+                ? 'example email template'
+                : 'structured template';
+
+              toast({
+                title: "✅ Email template saved",
+                description: `Custom ${templateDescription} has been set for this workflow. All emails will follow this template.`,
+              });
+
+              finalAssistantContent = `Perfect! I've saved your custom ${templateDescription}. All emails generated for this workflow will follow this template. You can run a test to see it in action.`;
+            } catch (error: any) {
+              console.error('Error setting email template:', error);
+              const errorMessage = error?.message || error?.details || error?.hint || 'Unknown error occurred';
+              toast({
+                title: "Error setting template",
+                description: errorMessage,
+                variant: "destructive",
+              });
+              finalAssistantContent = `Sorry, I encountered an error setting the template: ${errorMessage}`;
+            }
           } else if (toolCall.function?.name === 'connect_gmail') {
             try {
               const { reason } = JSON.parse(toolCall.function.arguments);
@@ -773,21 +1263,76 @@ try {
         }
       }
 
-      // Persist assistant message after processing tool calls
-      if (convId) {
-        const contentToSave = finalAssistantContent || streamedContent || 'I can help you create a campaign.';
-        await saveMessage(convId, 'assistant', contentToSave);
+    // Update the assistant message with final content and persist
+    if (convId) {
+      const contentToSave = finalAssistantContent || streamedContent || 'I can help you create a campaign.';
+      
+      // Get the latest metadata from the current message state (may have been updated by tool calls)
+      const currentMessage = messages[assistantMessageIndex];
+      const metadataToSave = currentMessage?.metadata || messages[assistantMessageIndex]?.metadata;
+      
+      // Update the UI message with final content (preserve metadata)
+      setMessages(prev => {
+        const updated = [...prev];
+        if (updated[assistantMessageIndex]) {
+          updated[assistantMessageIndex] = {
+            ...updated[assistantMessageIndex],
+            content: contentToSave,
+            // Preserve metadata if it exists
+            ...(metadataToSave && { metadata: metadataToSave })
+          };
+        }
+        return updated;
+      });
+      
+      // Save to DB with metadata - but don't update local state (real-time subscription will handle it)
+      const { error } = await supabase
+        .from('conversation_messages')
+        .insert({
+          conversation_id: convId,
+          role: 'assistant',
+          content: contentToSave,
+          metadata: metadataToSave || null
+        });
+      
+      if (error) {
+        console.error('Error saving assistant message:', error);
+      } else {
+        console.log('✅ Saved assistant message with metadata:', metadataToSave ? 'yes' : 'no');
       }
+    }
 
     } catch (error: any) {
       console.error('Error in chat:', error);
+      
+      // Extract error message - handle both string errors and JSON error responses
+      let errorMessage = error.message || 'Sorry, I encountered an error. Please try again.';
+      
+      // If error is a JSON string, try to parse it
+      try {
+        const errorObj = typeof error.message === 'string' ? JSON.parse(error.message) : error.message;
+        if (errorObj?.error) {
+          errorMessage = errorObj.error;
+        } else if (errorObj?.message) {
+          errorMessage = errorObj.message;
+        }
+      } catch (e) {
+        // Keep original message if parsing fails
+      }
+      
+      // Check if it's a retryable error (503, 500, etc.)
+      const isRetryable = errorMessage.includes('temporarily unavailable') || 
+                         errorMessage.includes('service is currently unavailable') ||
+                         errorMessage.includes('try again');
+      
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: error.message || 'Sorry, I encountered an error. Please try again.'
+        content: errorMessage + (isRetryable ? '\n\n💡 This is usually temporary - please try again in a few moments.' : '')
       }]);
+      
       toast({
-        title: "Error",
-        description: error.message || "Failed to send message",
+        title: isRetryable ? "Service Temporarily Unavailable" : "Error",
+        description: errorMessage + (isRetryable ? " Please try again in a few moments." : ""),
         variant: "destructive",
       });
     } finally {
@@ -815,7 +1360,20 @@ try {
       {/* Messages */}
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
-          {messages.filter(msg => msg && msg.role).map((message, index) => (
+          {messages
+            .filter(msg => msg && msg.role)
+            // Filter out duplicate execution monitors - only show the most recent one per conversation
+            .filter((message, index, arr) => {
+              if (message.metadata?.type === 'execution') {
+                // Find all execution messages
+                const executionMessages = arr.filter(m => m && m.metadata?.type === 'execution');
+                // Only keep the last one (most recent)
+                const lastExecution = executionMessages[executionMessages.length - 1];
+                return message === lastExecution;
+              }
+              return true;
+            })
+            .map((message, index) => (
             <div
               key={index}
               className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
@@ -854,6 +1412,21 @@ try {
                       try {
                         const { data: { user } } = await supabase.auth.getUser();
                         if (!user) throw new Error('Not authenticated');
+
+                        // Check if there's already a running execution in this conversation
+                        const existingExecution = messages.find(m => 
+                          m && m.metadata?.type === 'execution' && 
+                          m.metadata?.executionId
+                        );
+                        
+                        if (existingExecution) {
+                          console.log('Execution already exists in conversation, skipping duplicate');
+                          toast({
+                            title: "Test run already in progress",
+                            description: "There's already a test run running in this conversation.",
+                          });
+                          return;
+                        }
 
                         // Create workflow execution record
                         const { data: execution, error: execError } = await supabase
@@ -894,25 +1467,29 @@ try {
                           );
                         }
 
-                        // Call execute-workflow edge function (fire and forget)
-                        supabase.functions.invoke('execute-workflow', {
-                          body: {
-                            workflow_id: workflowId,
-                            execution_id: execution.id,
-                            max_prospects: 5,
-                            skip_sending: true,
-                          },
-                        }).then(({ error }) => {
-                          if (error) {
-                            console.error('Error executing workflow:', error);
+                        // Call execute-workflow edge function with proper error handling
+                        try {
+                          const { data: invokeData, error: invokeError } = await supabase.functions.invoke('execute-workflow', {
+                            body: {
+                              workflow_id: workflowId,
+                              execution_id: execution.id,
+                              conversation_id: currentConvId,
+                              max_prospects: 5,
+                              skip_sending: true,
+                              send_drafts_to_email: 'hariraghavan2023@gmail.com',
+                            },
+                          });
+
+                          if (invokeError) {
+                            console.error('Error executing workflow:', invokeError);
 
                             // Check for Gmail connection error
-                            const isGmailError = error.message?.includes('GMAIL_NOT_CONNECTED');
+                            const isGmailError = invokeError.message?.includes('GMAIL_NOT_CONNECTED');
 
                             // Check if error is due to function not being deployed
-                            const isDeploymentError = error.message?.includes('404') ||
-                                                     error.message?.includes('not found') ||
-                                                     error.message?.includes('FunctionsRelayError');
+                            const isDeploymentError = invokeError.message?.includes('404') ||
+                                                     invokeError.message?.includes('not found') ||
+                                                     invokeError.message?.includes('FunctionsRelayError');
 
                             if (isGmailError) {
                               toast({
@@ -925,12 +1502,21 @@ try {
                                 title: isDeploymentError ? "Edge Function Not Deployed" : "Execution Error",
                                 description: isDeploymentError
                                   ? "The execute-workflow function hasn't been deployed to Supabase. Please deploy it using: supabase functions deploy execute-workflow"
-                                  : error.message,
+                                  : invokeError.message,
                                 variant: "destructive",
                               });
                             }
+                          } else {
+                            console.log('✅ Workflow execution started successfully:', invokeData);
                           }
-                        });
+                        } catch (invokeErr: any) {
+                          console.error('Error invoking execute-workflow:', invokeErr);
+                          toast({
+                            title: "Execution Error",
+                            description: invokeErr.message || 'Failed to invoke execute-workflow function',
+                            variant: "destructive",
+                          });
+                        }
 
                         toast({
                           title: "Test run started",

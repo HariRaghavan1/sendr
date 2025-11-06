@@ -89,13 +89,15 @@ export const useConversation = (conversationId?: string) => {
    * @returns The ID of the newly created conversation
    * @throws Error if user is not authenticated or database operation fails
    */
-  const createConversation = async (firstMessage: string, campaignId?: string) => {
+  const createConversation = async (firstMessage?: string, campaignId?: string) => {
     try {
       const { data: user } = await supabase.auth.getUser();
       if (!user.user) throw new Error('Not authenticated');
 
-      // Generate title from first message
-      const generatedTitle = firstMessage.slice(0, 50) + (firstMessage.length > 50 ? '...' : '');
+      // Generate title from first message or use default
+      // Ensure messageText is always a string
+      const messageText = (firstMessage && typeof firstMessage === 'string') ? firstMessage : 'New Campaign';
+      const generatedTitle = messageText.slice(0, 50) + (messageText.length > 50 ? '...' : '');
 
       const { data: conversation, error } = await supabase
         .from('campaign_conversations')

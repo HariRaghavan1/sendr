@@ -10,9 +10,10 @@ import { z } from 'https://esm.sh/zod@3.25.76';
  * Workflow execution request schema
  */
 export const ExecuteWorkflowSchema = z.object({
-  workflow_id: z.string().uuid('Invalid workflow ID format'),
+  workflow_id: z.string().uuid('Invalid workflow ID format').optional(),
   execution_id: z.string().uuid('Invalid execution ID format'),
   campaign_id: z.string().uuid('Invalid campaign ID format').optional(),
+  conversation_id: z.string().uuid('Invalid conversation ID format').optional(),
   max_prospects: z.number()
     .int('Max prospects must be an integer')
     .min(1, 'Max prospects must be at least 1')
@@ -20,6 +21,7 @@ export const ExecuteWorkflowSchema = z.object({
     .optional(),
   skip_sending: z.boolean().optional(),
   enrich_emails: z.boolean().optional(),
+  send_drafts_to_email: z.string().email('Invalid email address').optional(),
 });
 
 /**

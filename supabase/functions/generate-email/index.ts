@@ -28,16 +28,12 @@ serve(async (req) => {
     const { data: { user } } = await supabaseClient.auth.getUser();
     if (!user) throw new Error("Not authenticated");
 
-    // Get user's OpenAI API key
-    const { data: settings } = await supabaseClient
-      .from('user_settings')
-      .select('openai_api_key')
-      .eq('user_id', user.id)
-      .single();
-
-    if (!settings?.openai_api_key) {
+    // Get Gemini API key from edge function secret
+    const geminiApiKey = Deno.env.get('GEMINI_API_KEY');
+    
+    if (!geminiApiKey) {
       return new Response(
-        JSON.stringify({ error: 'OpenAI API key not configured' }),
+        JSON.stringify({ error: 'Gemini API key not configured in edge function secrets' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -94,31 +90,41 @@ ${campaign.custom_prompt ? `Additional instructions: ${campaign.custom_prompt}` 
 
 Write a compelling subject line and email body that opens a conversation.`;
 
-    // Generate email using OpenAI
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${settings.openai_api_key}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'gpt-5-2025-08-07',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
-        max_completion_tokens: 300,
-      }),
-    });
+    // Generate email using Gemini
+    const geminiResponse = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${geminiApiKey}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }]
+            }
+          ],
+          generationConfig: {
+            maxOutputTokens: 300,
+            temperature: 0.7,
+          }
+        }),
+      }
+    );
 
-    if (!response.ok) {
-      const error = await response.text();
-      console.error('OpenAI API error:', error);
-      throw new Error(`OpenAI API error: ${response.statusText}`);
+    if (!geminiResponse.ok) {
+      const error = await geminiResponse.text();
+      console.error('Gemini API error:', error);
+      throw new Error(`Gemini API error: ${geminiResponse.statusText}`);
     }
 
-    const data = await response.json();
-    const generatedContent = data.choices[0].message.content;
+    const geminiData = await geminiResponse.json();
+    const generatedContent = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    
+    if (!generatedContent) {
+      throw new Error('No content generated from Gemini API');
+    }
 
     // Parse subject and body (expect format: "Subject: ...\n\nBody...")
     const lines = generatedContent.split('\n');

@@ -34,28 +34,41 @@ serve(async (req) => {
       throw new Error('User not authenticated');
     }
 
-    const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
-    if (!OPENAI_API_KEY) {
-      throw new Error('OpenAI API key not configured');
+    const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
+    if (!GEMINI_API_KEY) {
+      throw new Error('Gemini API key not configured');
     }
 
     console.log('Campaign chat - messages count:', messages.length);
 
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          {
-            role: 'system',
-            content: `You are an efficient AI assistant for creating email outreach campaigns and workflows. Your goal is to help users build campaigns QUICKLY and VISUALLY.
+    // System prompt
+    const systemMessage = `You are an efficient AI assistant for creating email outreach campaigns and workflows. Your goal is to help users build campaigns QUICKLY and VISUALLY.
 
-WHEN USER DESCRIBES A WORKFLOW (e.g., "find professors to do research", "reach out to investors"):
-1. Immediately create a visual workflow using create_workflow tool
+The system will automatically extract the sender's first name from their Gmail account for email signatures. If the user wants to use a different name (e.g., "use Hari instead" or "change my name to John"), use the set_sender_name tool to save their preference. Otherwise, the default Gmail name will be used.
+
+EMAIL TEMPLATE MANAGEMENT:
+- Users can set custom email templates or provide example emails
+- When a user says things like:
+  * "use this email as a template" or "generate emails like this" → Use set_email_template with example_email
+  * "use a formal template" or "always start with a question" → Use set_email_template with template_structure
+  * "I want emails to follow this format" → Extract the format and use set_email_template
+- ALWAYS use set_email_template tool when users provide:
+  * Example emails (copy/paste an email)
+  * Template preferences (formal, casual, specific structure)
+  * Format requirements (e.g., "always end with a question")
+
+WHEN USER DESCRIBES A WORKFLOW AND ASKS TO TEST IT (e.g., "find 5 executive directors and draft emails", "find prospects and send me drafts"):
+1. IMMEDIATELY create a campaign using create_campaign tool
+2. IMMEDIATELY run a test using run_test tool right after creating the campaign
+3. Extract email address from user's message if they mention sending drafts to an email (e.g., "send to hariraghavan2023@gmail.com")
+4. For test runs, ALWAYS set:
+   - send_drafts_to_email: Extract from user message OR default to 'hariraghavan2023@gmail.com'
+   - enrich_emails: true (so we can find prospect emails)
+   - skip_sending: true (don't actually send to prospects, just generate drafts)
+   - max_prospects: Extract number from user message OR default to 5
+
+WHEN USER DESCRIBES A WORKFLOW WITHOUT TESTING (e.g., "find professors to do research"):
+1. Create a visual workflow using create_workflow tool
 2. Ask 1-2 clarifying questions about target criteria
 3. Update the workflow using update_workflow tool based on their responses
 4. Show the workflow so users can see what they're building
@@ -70,605 +83,400 @@ OPTIONAL INFO (use smart defaults):
 - Company size: default to "50-200 employees" if not specified
 - Schedule: default to daily at 9 AM, 25 prospects per batch
 
-WORKFLOW INSTRUCTIONS (MEGA-PROMPT):
-When creating workflows, generate COMPREHENSIVE instructions that include:
+CRITICAL: If user mentions "draft emails", "send me drafts", "test it", "run a test", or provides an email address to send drafts to, you MUST:
+1. Create the campaign first
+2. Then IMMEDIATELY call run_test with the appropriate parameters
+3. Extract the email address from their message if provided
+4. This should all happen in ONE response - don't wait for confirmation
 
-1. TARGET CRITERIA DETAILS
-   - Exact job titles, seniority levels
-   - Company size, industry specifics
-   - Geographic preferences
-   - Any exclusions
+Be direct and action-oriented. Don't ask unnecessary questions.`;
 
-2. EMAIL GENERATION GUIDANCE
-   - Tone and style (professional, casual, etc.)
-   - Key talking points to mention
-   - Personalization strategy (mention their work, company, recent news)
-   - Length guidelines (keep concise, 3-4 sentences)
-   - Specific call-to-action
-
-3. OUTREACH STRATEGY
-   - When to send (time of day, day of week)
-   - Batch size and frequency
-   - Follow-up sequence (if any)
-   - Stopping conditions (replied, bounced, etc.)
-
-4. SPECIAL REQUIREMENTS
-   - Any compliance needs
-   - Custom variables to include
-
-Example mega-prompt:
-"Target computer science professors at R1 research universities in the US, focusing on those with active AI/ML research groups. Email should be professional but approachable, 3-4 sentences max. Open by referencing a recent paper or research area. Explain our research collaboration opportunity briefly. Close with specific ask for 15-min call. Send daily at 9 AM EST, 25 per batch. Stop if they reply or bounce. Include {first_name}, {university}, {research_area} variables."
-
-RUNNING TEST RUNS:
-When users want to run a test, look back through the conversation to find the workflow ID.
-
-CRITICAL: The workflow ID will appear in previous messages in this format:
-"Created campaign 'Name' (ID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)"
-
-Extract the UUID from that message and use it in your run_test call.
-
-Parameters for run_test:
-- workflow_id: The UUID found in the conversation (e.g., "193002f1-6870-420f-a3c3-7bb40243259c")
-- max_prospects: Number of prospects to test with (default 5)
-- skip_sending: Whether to skip actually sending emails (default true for testing)
-
-Examples:
-- User: "Run a test for 3 people"
-  → Look for "Created campaign" message, extract the ID like "193002f1-6870-420f-a3c3-7bb40243259c"
-  → Call run_test with workflow_id: "193002f1-6870-420f-a3c3-7bb40243259c", max_prospects: 3
-
-- User: "Test again with 10 prospects"  
-  → Find the most recent workflow ID from conversation history
-  → Call run_test with that ID, max_prospects: 10
-
-EMAIL TEMPLATES:
-Users can create email templates with components via chat:
-- "Add a template with background research and opening hook"
-- "Create an email template that focuses on personalization"
-
-Use add_email_template tool to create templates with these components:
-- background_research: Research to do on each prospect
-- opening_hook: How to open the email
-- value_proposition: Main value/benefit
-- personalization_strategy: How to personalize
-- call_to_action: What action to request
-- tone_guidelines: Tone and style instructions
-
-EDITING CAMPAIGNS:
-When users want to edit campaign details, use these patterns:
-
-Natural Language → Action:
-- "Change the tone to professional" → update_campaign with tone: "professional"
-- "Update target to CTOs in NYC" → update_campaign with target_criteria: { job_titles: ["CTO"], location: "NYC" }
-- "Make it run twice a day" → update_campaign with frequency_config: { type: "daily", batch_size: 50 }
-- "Pause the campaign" → update_campaign with status: "paused"
-- "Change the goal to booking demos" → update_campaign with goal: "demo"
-- "Update the instructions to mention our new product" → update_campaign with custom_prompt: "..."
-
-FINDING CAMPAIGN TO EDIT:
-Look back in the conversation for:
-1. Most recent "Created campaign" message with ID
-2. Check for workflow_id that links to a campaign
-3. Extract campaign_id or workflow_id from conversation history
-
-You can edit EVERYTHING about a campaign through chat. Always confirm what you changed.
-
-CLADO INTEGRATION:
-When creating workflows/campaigns, understand these target criteria patterns:
-
-User says → target_criteria:
-- "CTOs in San Francisco" → { job_titles: ["CTO"], location: "San Francisco" }
-- "founders at Y Combinator companies" → { job_titles: ["Founder", "Co-Founder"], companies: ["Y Combinator portfolio"] }
-- "software engineers at FAANG" → { job_titles: ["Software Engineer"], companies: ["Google", "Meta", "Amazon", "Apple", "Netflix"] }
-- "marketing directors in healthcare" → { job_titles: ["Marketing Director"], industry: "healthcare" }
-
-Clado will automatically:
-1. Find LinkedIn profiles matching the criteria using natural language search
-2. Enrich with email addresses (when enabled - costs 4 credits per email)
-3. Return full profile data (experience, education, skills, posts)
-
-If user asks about prospects without emails, suggest:
-"I'll enable email enrichment through Clado - this costs 4 credits per email found but significantly improves deliverability."
-
-PROACTIVE NOTIFICATIONS & UPDATES:
-After actions complete (test runs, email sends), provide conversational updates:
-- "Great news! Found 12 prospects matching your criteria. Want to review them?"
-- "All done! Generated 12 high-quality emails (avg score: 89/100). Ready to send?"
-- "Emails sent! 🎉 Your outreach to 12 CTOs in NYC is live."
-
-GMAIL CONNECTION (CRITICAL - READ THIS CAREFULLY):
-Before ANY email sending (skip_sending=false), you MUST ensure Gmail is connected:
-
-STEP-BY-STEP PROCESS FOR EMAIL SENDING:
-1. When user asks to "send emails", "send test", "actually send", or skip_sending=false:
-   a. First, check conversation history for "✅ Gmail Connected!" or "Gmail Connected" message
-   b. If NOT found → IMMEDIATELY call connect_gmail tool with reason explaining why
-   c. Show the connect button and tell user: "First, please connect your Gmail account to send emails."
-   d. WAIT for user to confirm connection (they'll say "connected", "done", "ready", etc.)
-   e. Only after confirmation → proceed with run_test(skip_sending=false)
-   
-2. If send-email fails with "GMAIL_NOT_CONNECTED" error:
-   → Call connect_gmail again with reason "Gmail authentication expired - please reconnect"
-
-3. Default behavior (IMPORTANT):
-   - ALL tests default to DRY RUN (skip_sending=true) for safety
-   - User says "test" or "run test" → skip_sending=true (no Gmail needed)
-   - User says "send test emails" or "actually send" → check Gmail first, then skip_sending=false
-
-EXAMPLES OF CORRECT BEHAVIOR:
-
-❌ WRONG FLOW:
-User: "Run test and send emails to 5 people"
-You: → Calling run_test(workflow_id="...", max_prospects=5, skip_sending=false)
-Result: FAILS - Gmail not connected
-
-✅ CORRECT FLOW:
-User: "Run test and send emails to 5 people"
-You: "Before sending emails, let's connect your Gmail account..."
-     → connect_gmail(reason="To send test emails to 5 prospects")
-User: "Done, I connected it"
-You: "Perfect! Running the test with email sending enabled..."
-     → run_test(workflow_id="...", max_prospects=5, skip_sending=false)
-
-✅ CORRECT FLOW (Gmail already connected):
-User: "Send 10 test emails"
-You: [Check history → sees "✅ Gmail Connected!" from earlier]
-     "Great, since Gmail is already connected, I'll run the test with sending enabled..."
-     → run_test(workflow_id="...", max_prospects=10, skip_sending=false)
-
-WORKFLOW:
-1. If user provides target audience, ask about their goal
-2. Once you have target + goal, CREATE immediately using the appropriate tool
-3. Use reasonable defaults for any missing details
-4. Keep it to 2-3 messages MAX
-
-Be direct and action-oriented. Don't ask unnecessary questions.`
-          },
-          ...messages
-        ],
-        tools: [
-          {
-            type: "function",
-            function: {
-              name: "create_campaign",
-              description: "Create a new email campaign when you have gathered enough information from the user",
-              parameters: {
+    // Define tools for Gemini function calling
+    const tools = [
+      {
+        type: "function",
+        function: {
+          name: "create_campaign",
+          description: "Create a new email campaign when you have gathered enough information from the user. After creating, if the user asked to test it or send drafts, IMMEDIATELY call run_test tool.",
+          parameters: {
+            type: "object",
+            properties: {
+              name: { type: "string", description: "A descriptive name for the campaign" },
+              target_criteria: {
                 type: "object",
+                description: "Criteria for finding prospects",
                 properties: {
-                  name: { 
-                    type: "string", 
-                    description: "A descriptive name for the campaign" 
-                  },
-                  target_criteria: {
-                    type: "object",
-                    description: "Criteria for finding prospects",
-                    properties: {
-                      job_titles: { 
-                        type: "array", 
-                        items: { type: "string" },
-                        description: "Array of job titles to target"
-                      },
-                      industry: { 
-                        type: "string",
-                        description: "Industry to target"
-                      },
-                      location: { 
-                        type: "string",
-                        description: "Geographic location"
-                      },
-                      company_size: { 
-                        type: "string",
-                        description: "Company size range"
-                      }
-                    }
-                  },
-                  tone: {
-                    type: "string",
-                    enum: ["professional", "casual"],
-                    description: "Email tone to use"
-                  },
-                  goal: {
-                    type: "string",
-                    enum: ["meeting", "demo", "call", "information"],
-                    description: "Campaign goal"
-                  },
-                  custom_prompt: { 
-                    type: "string", 
-                    description: "Additional instructions for email generation" 
-                  }
-                },
-                required: ["name", "target_criteria", "tone", "goal"]
-              }
-            }
-          },
-          {
-            type: "function",
-            function: {
-              name: "create_workflow",
-              description: "Create a visual workflow for complex campaigns. Use this when user describes a multi-step outreach process.",
-              parameters: {
-                type: "object",
-                properties: {
-                  name: { 
-                    type: "string", 
-                    description: "Descriptive workflow name" 
-                  },
-                  description: {
-                    type: "string",
-                    description: "Brief 1-2 sentence summary of what this workflow does and who it targets"
-                  },
-                  goal: {
-                    type: "string",
-                    enum: ["meeting", "demo", "call", "information"],
-                    description: "Campaign goal"
-                  },
-                  target_criteria: {
-                    type: "object",
-                    description: "Target audience criteria",
-                    properties: {
-                      job_titles: { type: "array", items: { type: "string" } },
-                      industry: { type: "string" },
-                      location: { type: "string" },
-                      company_size: { type: "string" }
-                    }
-                  },
-                  tone: {
-                    type: "string",
-                    enum: ["professional", "casual"],
-                    description: "Email tone"
-                  },
-                  instructions: {
-                    type: "string",
-                    description: "Comprehensive mega-prompt with detailed step-by-step instructions covering target criteria, email generation guidance, personalization tactics, outreach strategy, and special requirements. Be thorough and specific."
-                  },
-                  schedule: {
-                    type: "object",
-                    description: "Campaign execution schedule",
-                    properties: {
-                      frequency: {
-                        type: "string",
-                        enum: ["daily", "weekly", "monthly"],
-                        description: "How often to run the campaign"
-                      },
-                      time: {
-                        type: "string",
-                        description: "Time to run in HH:MM format (e.g., '09:00')"
-                      },
-                      batch_size: {
-                        type: "number",
-                        description: "Number of prospects to process per run"
-                      }
-                    }
-                  },
-                  steps: {
-                    type: "array",
-                    description: "Workflow steps",
-                    items: {
-                      type: "object",
-                      properties: {
-                        action: { 
-                          type: "string",
-                          enum: ["find_prospects", "generate_email", "send_email"],
-                          description: "Step action"
-                        },
-                        description: { type: "string" }
-                      }
-                    }
-                  }
-                },
-                required: ["name", "description", "goal", "target_criteria", "instructions", "schedule", "steps"]
-              }
-            }
-          },
-          {
-            type: "function",
-            function: {
-              name: "run_test",
-              description: "Run a test execution of a workflow with specified parameters. Use this when user wants to test a campaign. IMPORTANT: workflow_id must be the UUID returned from create_workflow, NOT the workflow name. Note: Workflows are automatically linked to campaigns. Set skip_sending=false if the user explicitly asks to 'send' emails (requires Composio setup with Gmail connected). By default, skip_sending=true for safety (dry run mode).",
-              parameters: {
-                type: "object",
-                properties: {
-                  workflow_id: {
-                    type: "string",
-                    description: "UUID of the workflow to test (from the 'id' field returned by create_workflow)"
-                  },
-                  max_prospects: {
-                    type: "number",
-                    description: "Number of prospects to test with (default: 5)",
-                    default: 5
-                  },
-                  skip_sending: {
-                    type: "boolean",
-                    description: "Whether to skip actually sending emails (default: true for testing)",
-                    default: true
-                  },
-                  use_template: {
-                    type: "boolean",
-                    description: "Whether to use an email template",
-                    default: false
-                  },
-                  template_id: {
-                    type: "string",
-                    description: "ID of template to use (if use_template is true)"
-                  }
-                },
-                required: ["workflow_id"]
-              }
-            }
-          },
-          {
-            type: "function",
-            function: {
-              name: "add_email_template",
-              description: "Create a new email template with structured components for a workflow",
-              parameters: {
-                type: "object",
-                properties: {
-                  workflow_id: {
-                    type: "string",
-                    description: "ID of workflow this template is for"
-                  },
-                  name: {
-                    type: "string",
-                    description: "Template name"
-                  },
-                  subject: {
-                    type: "string",
-                    description: "Email subject line with variables like {name}, {company}, {title}"
-                  },
-                  body: {
-                    type: "string",
-                    description: "Email body with variables like {name}, {company}, {title}"
-                  },
-                  components: {
-                    type: "object",
-                    description: "Structured template components",
-                    properties: {
-                      background_research: {
-                        type: "string",
-                        description: "What background research to do on prospects"
-                      },
-                      opening_hook: {
-                        type: "string",
-                        description: "How to open the email"
-                      },
-                      value_proposition: {
-                        type: "string",
-                        description: "Main value proposition"
-                      },
-                      personalization_strategy: {
-                        type: "string",
-                        description: "How to personalize the email"
-                      },
-                      call_to_action: {
-                        type: "string",
-                        description: "What action to request"
-                      },
-                      tone_guidelines: {
-                        type: "string",
-                        description: "Tone and style guidelines"
-                      }
-                    }
-                  }
-                },
-                required: ["workflow_id", "name", "subject", "body", "components"]
-              }
-            }
-          },
-          {
-            type: "function",
-            function: {
-              name: "edit_email_template",
-              description: "Edit an existing email template",
-              parameters: {
-                type: "object",
-                properties: {
-                  template_id: {
-                    type: "string",
-                    description: "ID of template to edit"
-                  },
-                  updates: {
-                    type: "object",
-                    description: "Fields to update",
-                    properties: {
-                      name: { type: "string" },
-                      subject: { type: "string" },
-                      body: { type: "string" },
-                      components: { type: "object" }
-                    }
-                  }
-                },
-                required: ["template_id", "updates"]
-              }
-            }
-          },
-          {
-            type: "function",
-            function: {
-              name: "update_campaign",
-              description: "Update campaign settings when user wants to change campaign details, schedule, or status. CRITICAL: Look back through the conversation to find the campaign_id from the most recent 'Created campaign' message that shows an ID.",
-              parameters: {
-                type: "object",
-                properties: {
-                  campaign_id: {
-                    type: "string",
-                    description: "Campaign UUID (find from conversation history)"
-                  },
-                  updates: {
-                    type: "object",
-                    description: "Fields to update",
-                    properties: {
-                      name: { type: "string", description: "Campaign name" },
-                      status: {
-                        type: "string",
-                        enum: ["draft", "active", "paused", "completed"],
-                        description: "Campaign status"
-                      },
-                      target_criteria: {
-                        type: "object",
-                        description: "Target audience criteria"
-                      },
-                      tone: {
-                        type: "string",
-                        enum: ["professional", "casual"],
-                        description: "Email tone"
-                      },
-                      goal: {
-                        type: "string",
-                        enum: ["meeting", "demo", "call", "information"],
-                        description: "Campaign goal"
-                      },
-                      custom_prompt: {
-                        type: "string",
-                        description: "Additional email generation instructions"
-                      },
-                      frequency_config: {
-                        type: "object",
-                        description: "Schedule configuration",
-                        properties: {
-                          type: {
-                            type: "string",
-                            enum: ["daily", "weekly", "monthly"]
-                          },
-                          time: { type: "string" },
-                          batch_size: { type: "number" }
-                        }
-                      }
-                    }
-                  }
-                },
-                required: ["campaign_id", "updates"]
-              }
-            }
-          },
-          {
-            type: "function",
-            function: {
-              name: "edit_email",
-              description: "Edit or regenerate a specific email with custom instructions. Use when user wants to modify individual emails.",
-              parameters: {
-                type: "object",
-                properties: {
-                  prospect_name: {
-                    type: "string",
-                    description: "Name of the prospect (for context)"
-                  },
-                  instruction: {
-                    type: "string",
-                    description: "Specific editing instruction, e.g., 'make it more casual', 'add reference to their recent blog post', 'shorten to 80 words'"
-                  }
-                },
-                required: ["prospect_name", "instruction"]
-              }
-            }
-          },
-          {
-            type: "function",
-            function: {
-              name: "customize_batch",
-              description: "Apply custom instructions to next email generation batch. Use when user wants to modify how future emails are generated.",
-              parameters: {
-                type: "object",
-                properties: {
-                  workflow_id: {
-                    type: "string",
-                    description: "Workflow ID to customize"
-                  },
-                  instructions: {
-                    type: "string",
-                    description: "Custom instructions for email generation"
-                  },
-                  apply_to: {
-                    type: "string",
-                    enum: ["all", "remaining", "specific_titles"],
-                    description: "Scope of customization"
-                  }
-                },
-                required: ["workflow_id", "instructions", "apply_to"]
-              }
-            }
-          },
-          {
-            type: "function",
-            function: {
-              name: "update_workflow",
-              description: "Update an existing workflow based on user feedback",
-              parameters: {
-                type: "object",
-                properties: {
-                  workflow_id: { 
-                    type: "string",
-                    description: "ID of workflow to update"
-                  },
-                  updates: {
-                    type: "object",
-                    description: "Fields to update (partial workflow object)",
-                    properties: {
-                      name: { type: "string" },
-                      description: { type: "string" },
-                      target_criteria: { type: "object" },
-                      tone: { type: "string" },
-                      goal: { type: "string" },
-                      instructions: { type: "string" },
-                      schedule: { type: "object" },
-                      steps: { 
-                        type: "array",
-                        items: {
-                          type: "object",
-                          properties: {
-                            action: { 
-                              type: "string",
-                              enum: ["find_prospects", "generate_email", "send_email"]
-                            },
-                            description: { type: "string" }
-                          }
-                        }
-                      }
-                    }
-                  }
-                },
-                required: ["workflow_id", "updates"]
-              }
-            }
-          },
-          {
-            type: "function",
-            function: {
-              name: "connect_gmail",
-              description: "Prompt user to connect their Gmail account via Composio. Use this when user wants to send emails but hasn't connected Gmail yet, or when they encounter authentication errors.",
-              parameters: {
-                type: "object",
-                properties: {
-                  reason: {
-                    type: "string",
-                    description: "Why Gmail connection is needed (e.g., 'To send test emails', 'Email sending failed - please reconnect')"
-                  }
-                },
-                required: ["reason"]
-              }
-            }
+                  job_titles: { type: "array", items: { type: "string" }, description: "Array of job titles to target" },
+                  industry: { type: "string", description: "Industry to target" },
+                  location: { type: "string", description: "Geographic location" },
+                  company_size: { type: "string", description: "Company size range" }
+                }
+              },
+              tone: { type: "string", enum: ["professional", "casual"], description: "Email tone to use" },
+              goal: { type: "string", enum: ["meeting", "demo", "call", "information"], description: "Campaign goal" },
+              custom_prompt: { type: "string", description: "Additional instructions for email generation" }
+            },
+            required: ["name", "target_criteria", "tone", "goal"]
           }
-        ],
-        stream: true
-      }),
-    });
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "create_workflow",
+          description: "Create a visual workflow for complex campaigns",
+          parameters: {
+            type: "object",
+            properties: {
+              name: { type: "string", description: "Descriptive workflow name" },
+              description: { type: "string", description: "Brief summary of what this workflow does" },
+              goal: { type: "string", enum: ["meeting", "demo", "call", "information"], description: "Campaign goal" },
+              target_criteria: {
+                type: "object",
+                description: "Target audience criteria",
+                properties: {
+                  job_titles: { type: "array", items: { type: "string" } },
+                  industry: { type: "string" },
+                  location: { type: "string" },
+                  company_size: { type: "string" }
+                }
+              },
+              tone: { type: "string", enum: ["professional", "casual"], description: "Email tone" },
+              instructions: { type: "string", description: "Comprehensive instructions" },
+              schedule: {
+                type: "object",
+                description: "Campaign execution schedule",
+                properties: {
+                  frequency: { type: "string", enum: ["daily", "weekly", "monthly"] },
+                  time: { type: "string", description: "Time to run in HH:MM format" },
+                  batch_size: { type: "number", description: "Number of prospects per run" }
+                }
+              },
+              steps: {
+                type: "array",
+                description: "Workflow steps",
+                items: {
+                  type: "object",
+                  properties: {
+                    action: { type: "string", enum: ["find_prospects", "generate_email", "send_email"] },
+                    description: { type: "string" }
+                  }
+                }
+              }
+            },
+            required: ["name", "description", "goal", "target_criteria", "instructions", "schedule", "steps"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "run_test",
+          description: "Run a test execution of a workflow. CRITICAL: Extract the email address from the user's message if they mention sending drafts to an email (e.g., 'send to hariraghavan2023@gmail.com' or 'draft emails that you send to X'). If no email is mentioned, default to 'hariraghavan2023@gmail.com'. ALWAYS set enrich_emails=true so we can find prospect email addresses. Set skip_sending=true so we don't actually send to prospects, just generate drafts. Extract the number of prospects from user message (e.g., 'find 5 executive directors' = max_prospects: 5). If workflow_id is not provided, the system will automatically find the workflow from the conversation context. IMPORTANT: Call this IMMEDIATELY after create_campaign if the user asked to test or draft emails.",
+          parameters: {
+            type: "object",
+            properties: {
+              workflow_id: { type: "string", description: "UUID of the workflow to test. Optional - if not provided, will automatically find the workflow from the conversation." },
+              max_prospects: { type: "number", description: "Number of prospects to test with (default: 5)", default: 5 },
+              skip_sending: { type: "boolean", description: "Whether to skip actually sending emails. Set to false if user wants to actually send emails. Default: true for safety.", default: true },
+              enrich_emails: { type: "boolean", description: "Whether to enrich prospects with email addresses via Clado (costs 4 credits per email). Set to true if user wants to send emails. Default: false.", default: false },
+              send_drafts_to_email: { type: "string", description: "Email address to send all generated email drafts to for review. For test runs, ALWAYS set this to 'hariraghavan2023@gmail.com' so the user can review the drafts. This sends a summary email with all drafts instead of sending to prospects." }
+            },
+            required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "connect_gmail",
+          description: "Prompt user to connect their Gmail account via Composio",
+          parameters: {
+            type: "object",
+            properties: {
+              reason: { type: "string", description: "Why Gmail connection is needed" }
+            },
+            required: ["reason"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "set_sender_name",
+          description: "Save a custom name for email signatures. Call this when the user explicitly wants to override the default Gmail name (e.g., 'use Hari instead', 'change my name to John', 'I want to sign as Dr. Smith'). If they just mention their name casually, you don't need to use this tool - the system will use their Gmail name by default.",
+          parameters: {
+            type: "object",
+            properties: {
+              name: { type: "string", description: "The custom name to use when signing emails instead of the default Gmail name (e.g., 'Hari', 'John Smith', 'Dr. Smith', etc.)" }
+            },
+            required: ["name"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "set_email_template",
+          description: "Set a custom email template or example email for the workflow. Use this when the user wants to: 1) Use a specific email template (e.g., 'use a formal template', 'use a casual template'), 2) Provide an example email to follow (e.g., 'use this email as a template', 'generate emails like this'), 3) Specify template requirements (e.g., 'always start with a question', 'end with a call to action'). This template will be used for ALL emails generated in this workflow.",
+          parameters: {
+            type: "object",
+            properties: {
+              workflow_id: { type: "string", description: "UUID of the workflow to update. If not provided, will find the workflow from the conversation context." },
+              template_type: { 
+                type: "string", 
+                enum: ["structured", "example"], 
+                description: "Type of template: 'structured' for a structured template with sections, 'example' for a complete example email to follow" 
+              },
+              template_structure: {
+                type: "object",
+                description: "For structured templates: define the structure with sections (greeting, opening, body, cta, closing). Each section can have instructions.",
+                properties: {
+                  greeting: { type: "string", description: "Greeting format instructions (e.g., 'Always use Hi {first_name},')" },
+                  opening: { type: "string", description: "Opening line instructions (e.g., 'Start with a question about their role')" },
+                  body: { type: "string", description: "Body paragraph instructions (e.g., 'Mention their company and how we can help')" },
+                  cta: { type: "string", description: "Call to action instructions (e.g., 'Ask for a 15-minute call')" },
+                  closing: { type: "string", description: "Closing format (e.g., 'Always use Best,')" }
+                }
+              },
+              example_email: {
+                type: "object",
+                description: "For example emails: provide a complete example email that should be used as a template",
+                properties: {
+                  subject: { type: "string", description: "Example subject line" },
+                  body: { type: "string", description: "Example email body (use {first_name}, {company}, {title} as placeholders)" }
+                }
+              },
+              template_instructions: {
+                type: "string",
+                description: "Additional instructions for how to use this template (e.g., 'Always personalize the opening based on their role', 'Keep it under 100 words')"
+              }
+            },
+            required: ["template_type"]
+          }
+        }
+      }
+    ];
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('OpenAI API error:', response.status, errorText);
+    // Convert OpenAI tools format to Gemini function declarations
+    const functionDeclarations = tools.map((tool: any) => ({
+      name: tool.function.name,
+      description: tool.function.description,
+      parameters: tool.function.parameters
+    }));
+
+    // Convert OpenAI messages format to Gemini contents format
+    const geminiContents: any[] = [];
+    
+    // Add system message as first user message
+    geminiContents.push({
+      role: 'user',
+      parts: [{ text: systemMessage }]
+    });
+    
+    // Add model response acknowledging system message
+    geminiContents.push({
+      role: 'model',
+      parts: [{ text: 'I understand. I\'m ready to help you create email outreach campaigns and workflows.' }]
+    });
+    
+    // Convert conversation messages
+    for (const msg of messages) {
+      if (msg.role === 'user' || msg.role === 'assistant') {
+        geminiContents.push({
+          role: msg.role === 'user' ? 'user' : 'model',
+          parts: [{ text: msg.content || '' }]
+        });
+      }
+    }
+
+    // Build Gemini request
+    const geminiRequest: any = {
+      contents: geminiContents,
+      generationConfig: {
+        temperature: 0.7,
+      }
+    };
+
+    // Add tools if available
+    if (functionDeclarations.length > 0) {
+      geminiRequest.tools = [{
+        functionDeclarations: functionDeclarations
+      }];
+    }
+
+    // Call Gemini API with streaming
+    const geminiResponse = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent?alt=sse`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': GEMINI_API_KEY,
+        },
+        body: JSON.stringify(geminiRequest),
+      }
+    );
+
+    if (!geminiResponse.ok) {
+      const errorText = await geminiResponse.text();
+      let errorJson: any = null;
+      try {
+        errorJson = JSON.parse(errorText);
+      } catch (e) {
+        // If parsing fails, use the raw text
+      }
       
-      if (response.status === 429) {
+      console.error('Gemini API error:', geminiResponse.status, errorText);
+      
+      // Handle specific error codes
+      if (geminiResponse.status === 429) {
         return new Response(JSON.stringify({ error: 'Rate limit exceeded. Please try again in a moment.' }), {
           status: 429,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
       
-      throw new Error(`OpenAI API error: ${errorText}`);
+      if (geminiResponse.status === 503 || geminiResponse.status === 500) {
+        const errorMessage = errorJson?.error?.message || 'The AI service is temporarily unavailable';
+        return new Response(JSON.stringify({ 
+          error: `${errorMessage}. This is usually temporary - please try again in a few moments.`,
+          code: errorJson?.error?.code || 'SERVICE_UNAVAILABLE',
+          retryable: true
+        }), {
+          status: geminiResponse.status,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      
+      // For other errors, return a more user-friendly message
+      const errorMessage = errorJson?.error?.message || errorText || 'An error occurred';
+      throw new Error(`Gemini API error: ${errorMessage}`);
     }
 
-    // Return streaming response
-    return new Response(response.body, {
+    // Transform Gemini SSE format to OpenAI SSE format
+    const reader = geminiResponse.body?.getReader();
+    const decoder = new TextDecoder();
+    const encoder = new TextEncoder();
+    
+    if (!reader) {
+      throw new Error('No response body from Gemini API');
+    }
+
+    // Create a transform stream to convert Gemini SSE to OpenAI SSE format
+    const transformStream = new ReadableStream({
+      async start(controller) {
+        let buffer = '';
+        let chunkId = 0;
+        
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            buffer += decoder.decode(value, { stream: true });
+            
+            // Process complete SSE lines
+            let newlineIndex: number;
+            while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
+              const line = buffer.slice(0, newlineIndex).trim();
+              buffer = buffer.slice(newlineIndex + 1);
+              
+              if (!line.startsWith('data: ')) continue;
+              
+              const jsonStr = line.slice(6);
+              if (jsonStr === '{}' || jsonStr.trim() === '') continue;
+              
+              try {
+                const geminiData = JSON.parse(jsonStr);
+                
+                // Transform Gemini format to OpenAI format
+                if (geminiData.candidates && geminiData.candidates[0]) {
+                  const candidate = geminiData.candidates[0];
+                  
+                  // Handle text content
+                  if (candidate.content && candidate.content.parts) {
+                    const textPart = candidate.content.parts.find((p: any) => p.text);
+                    if (textPart && textPart.text) {
+                      const openaiFormat = {
+                        id: `chatcmpl-${chunkId++}`,
+                        object: 'chat.completion.chunk',
+                        created: Math.floor(Date.now() / 1000),
+                        model: 'gemini-2.5-flash-lite',
+                        choices: [{
+                          index: 0,
+                          delta: { content: textPart.text },
+                          finish_reason: null
+                        }]
+                      };
+                      controller.enqueue(encoder.encode(`data: ${JSON.stringify(openaiFormat)}\n\n`));
+                    }
+                  }
+                  
+                  // Handle function calls
+                  if (candidate.content && candidate.content.parts) {
+                    const functionCallPart = candidate.content.parts.find((p: any) => p.functionCall);
+                    if (functionCallPart && functionCallPart.functionCall) {
+                      const fc = functionCallPart.functionCall;
+                      const openaiFormat = {
+                        id: `chatcmpl-${chunkId++}`,
+                        object: 'chat.completion.chunk',
+                        created: Math.floor(Date.now() / 1000),
+                        model: 'gemini-2.5-flash-lite',
+                        choices: [{
+                          index: 0,
+                          delta: {
+                            role: 'assistant',
+                            tool_calls: [{
+                              index: 0,
+                              id: `call_${chunkId}`,
+                              type: 'function',
+                              function: {
+                                name: fc.name,
+                                arguments: JSON.stringify(fc.args || {})
+                              }
+                            }]
+                          },
+                          finish_reason: null
+                        }]
+                      };
+                      controller.enqueue(encoder.encode(`data: ${JSON.stringify(openaiFormat)}\n\n`));
+                    }
+                  }
+                  
+                  // Handle finish
+                  if (candidate.finishReason && candidate.finishReason !== '') {
+                    const openaiFormat = {
+                      id: `chatcmpl-${chunkId++}`,
+                      object: 'chat.completion.chunk',
+                      created: Math.floor(Date.now() / 1000),
+                        model: 'gemini-2.5-flash-lite',
+                      choices: [{
+                        index: 0,
+                        delta: {},
+                        finish_reason: candidate.finishReason === 'STOP' ? 'stop' : 'function_call'
+                      }]
+                    };
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify(openaiFormat)}\n\n`));
+                  }
+                }
+              } catch (e) {
+                console.error('Error parsing Gemini SSE:', e);
+              }
+            }
+          }
+          
+          // Send final [DONE] marker
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        } catch (error) {
+          controller.error(error);
+        }
+      }
+    });
+
+    // Return transformed streaming response
+    return new Response(transformStream, {
       headers: { 
         ...corsHeaders, 
         'Content-Type': 'text/event-stream',
