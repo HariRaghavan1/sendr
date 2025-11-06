@@ -34,17 +34,10 @@ serve(async (req) => {
       throw new Error('User not authenticated');
     }
 
-    const { data: settings, error: settingsError } = await supabaseClient
-      .from('user_settings')
-      .select('openai_api_key')
-      .eq('user_id', user.id)
-      .maybeSingle();
-
-    if (settingsError || !settings?.openai_api_key) {
-      throw new Error('OpenAI API key not configured. Please add it in Settings.');
+    const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
+    if (!OPENAI_API_KEY) {
+      throw new Error('OpenAI API key not configured');
     }
-
-    const OPENAI_API_KEY = settings.openai_api_key;
 
     console.log('Campaign chat - messages count:', messages.length);
 

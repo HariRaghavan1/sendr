@@ -16,13 +16,11 @@ export default function Settings() {
   
   const [settings, setSettings] = useState({
     clado_api_key: "",
-    openai_api_key: "",
     composio_api_key: "",
   });
 
   const [visibility, setVisibility] = useState({
     clado_api_key: false,
-    openai_api_key: false,
     composio_api_key: false,
   });
 
@@ -45,7 +43,6 @@ export default function Settings() {
     } else if (data) {
       setSettings({
         clado_api_key: data.clado_api_key || "",
-        openai_api_key: data.openai_api_key || "",
         composio_api_key: data.composio_api_key || "",
       });
     }
@@ -139,39 +136,6 @@ export default function Settings() {
               </div>
               <p className="text-xs text-muted-foreground">
                 Used for B2B lead discovery. Get your key at <a href="https://clado.ai" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">clado.ai</a>
-              </p>
-            </div>
-
-            <Separator />
-
-            {/* OpenAI API Key */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="openai">OpenAI API Key</Label>
-                {isKeyConfigured("openai_api_key") ? (
-                  <CheckCircle className="h-4 w-4 text-green-500" />
-                ) : (
-                  <XCircle className="h-4 w-4 text-muted-foreground" />
-                )}
-              </div>
-              <div className="flex gap-2">
-                <Input
-                  id="openai"
-                  type={visibility.openai_api_key ? "text" : "password"}
-                  placeholder="Enter your OpenAI API key"
-                  value={settings.openai_api_key}
-                  onChange={(e) => setSettings({ ...settings, openai_api_key: e.target.value })}
-                />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => toggleVisibility("openai_api_key")}
-                >
-                  {visibility.openai_api_key ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Used for AI email generation. Get your key at <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">platform.openai.com</a>
               </p>
             </div>
 
