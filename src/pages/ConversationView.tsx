@@ -79,9 +79,6 @@ const ConversationView = () => {
         if (response.status === 429) {
           throw new Error('Rate limit exceeded. Please try again in a moment.');
         }
-        if (response.status === 402) {
-          throw new Error('AI credits exhausted. Please add credits in Settings.');
-        }
         const err = await response.json().catch(() => null);
         throw new Error(err?.error || 'Failed to get response');
       }
