@@ -610,11 +610,11 @@ serve(async (req) => {
 async function updateExecutionLog(supabase: any, executionId: string, message: string) {
   const { data: execution } = await supabase
     .from('workflow_executions')
-    .select('progress_logs')
+    .select('execution_log')
     .eq('id', executionId)
     .single();
 
-  const logs = execution?.progress_logs || [];
+  const logs = execution?.execution_log || [];
   logs.push({
     message,
     timestamp: new Date().toISOString(),
@@ -622,7 +622,7 @@ async function updateExecutionLog(supabase: any, executionId: string, message: s
 
   await supabase
     .from('workflow_executions')
-    .update({ progress_logs: logs })
+    .update({ execution_log: logs })
     .eq('id', executionId);
 }
 
