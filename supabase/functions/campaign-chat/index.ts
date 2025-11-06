@@ -68,6 +68,36 @@ OPTIONAL INFO (use smart defaults):
 - Tone: default to "casual" if not specified
 - Location: default to "United States" if not specified
 - Company size: default to "50-200 employees" if not specified
+- Schedule: default to daily at 9 AM, 25 prospects per batch
+
+WORKFLOW INSTRUCTIONS (MEGA-PROMPT):
+When creating workflows, generate COMPREHENSIVE instructions that include:
+
+1. TARGET CRITERIA DETAILS
+   - Exact job titles, seniority levels
+   - Company size, industry specifics
+   - Geographic preferences
+   - Any exclusions
+
+2. EMAIL GENERATION GUIDANCE
+   - Tone and style (professional, casual, etc.)
+   - Key talking points to mention
+   - Personalization strategy (mention their work, company, recent news)
+   - Length guidelines (keep concise, 3-4 sentences)
+   - Specific call-to-action
+
+3. OUTREACH STRATEGY
+   - When to send (time of day, day of week)
+   - Batch size and frequency
+   - Follow-up sequence (if any)
+   - Stopping conditions (replied, bounced, etc.)
+
+4. SPECIAL REQUIREMENTS
+   - Any compliance needs
+   - Custom variables to include
+
+Example mega-prompt:
+"Target computer science professors at R1 research universities in the US, focusing on those with active AI/ML research groups. Email should be professional but approachable, 3-4 sentences max. Open by referencing a recent paper or research area. Explain our research collaboration opportunity briefly. Close with specific ask for 15-min call. Send daily at 9 AM EST, 25 per batch. Stop if they reply or bounce. Include {first_name}, {university}, {research_area} variables."
 
 WORKFLOW:
 1. If user provides target audience, ask about their goal
@@ -146,6 +176,10 @@ Be direct and action-oriented. Don't ask unnecessary questions.`
                     type: "string", 
                     description: "Descriptive workflow name" 
                   },
+                  description: {
+                    type: "string",
+                    description: "Brief 1-2 sentence summary of what this workflow does and who it targets"
+                  },
                   goal: {
                     type: "string",
                     enum: ["meeting", "demo", "call", "information"],
@@ -166,6 +200,29 @@ Be direct and action-oriented. Don't ask unnecessary questions.`
                     enum: ["professional", "casual"],
                     description: "Email tone"
                   },
+                  instructions: {
+                    type: "string",
+                    description: "Comprehensive mega-prompt with detailed step-by-step instructions covering target criteria, email generation guidance, personalization tactics, outreach strategy, and special requirements. Be thorough and specific."
+                  },
+                  schedule: {
+                    type: "object",
+                    description: "Campaign execution schedule",
+                    properties: {
+                      frequency: {
+                        type: "string",
+                        enum: ["daily", "weekly", "monthly"],
+                        description: "How often to run the campaign"
+                      },
+                      time: {
+                        type: "string",
+                        description: "Time to run in HH:MM format (e.g., '09:00')"
+                      },
+                      batch_size: {
+                        type: "number",
+                        description: "Number of prospects to process per run"
+                      }
+                    }
+                  },
                   steps: {
                     type: "array",
                     description: "Workflow steps",
@@ -182,7 +239,7 @@ Be direct and action-oriented. Don't ask unnecessary questions.`
                     }
                   }
                 },
-                required: ["name", "goal", "target_criteria", "steps"]
+                required: ["name", "description", "goal", "target_criteria", "instructions", "schedule", "steps"]
               }
             }
           },
@@ -203,9 +260,12 @@ Be direct and action-oriented. Don't ask unnecessary questions.`
                     description: "Fields to update (partial workflow object)",
                     properties: {
                       name: { type: "string" },
+                      description: { type: "string" },
                       target_criteria: { type: "object" },
                       tone: { type: "string" },
                       goal: { type: "string" },
+                      instructions: { type: "string" },
+                      schedule: { type: "object" },
                       steps: { 
                         type: "array",
                         items: {

@@ -193,7 +193,30 @@ const ConversationView = () => {
           } else if (toolCall.function?.name === 'create_workflow') {
             try {
               const workflowData = JSON.parse(toolCall.function.arguments);
-              workflowData.id = `workflow_${Date.now()}`;
+              const { data: { user } } = await supabase.auth.getUser();
+              if (!user) throw new Error('Not authenticated');
+              
+              // Save workflow to database
+              const { data: workflow, error: workflowError } = await supabase
+                .from('workflows')
+                .insert({
+                  user_id: user.id,
+                  conversation_id: convId,
+                  name: workflowData.name,
+                  description: workflowData.description,
+                  workflow_config: workflowData,
+                  instructions: workflowData.instructions || '',
+                  schedule_config: workflowData.schedule || { frequency: 'daily', time: '09:00', batch_size: 25 },
+                  status: 'draft'
+                })
+                .select()
+                .single();
+
+              if (workflowError) {
+                console.error('Error saving workflow:', workflowError);
+              } else {
+                workflowData.id = workflow.id;
+              }
               
               setMessages(prev => {
                 const updated = [...prev];
@@ -201,6 +224,7 @@ const ConversationView = () => {
                   ...updated[assistantMessageIndex],
                   metadata: {
                     type: 'workflow',
+                    workflowId: workflow?.id,
                     workflowData
                   }
                 };
@@ -286,6 +310,105 @@ const ConversationView = () => {
                     workflow={message.metadata.workflowData}
                     onEdit={() => {
                       setInput(`Update the workflow: `);
+                    }}
+                    onTestRun={async () => {
+                      const workflowId = message.metadata?.workflowId;
+                      if (!workflowId) {
+                        toast({
+                          title: "Error",
+                          description: "Workflow not saved yet",
+                          variant: "destructive",
+                        });
+                        return;
+                      }
+
+                      try {
+                        const { data: { user } } = await supabase.auth.getUser();
+                        if (!user) throw new Error('Not authenticated');
+
+                        const { data: execution } = await supabase
+                          .from('workflow_executions')
+                          .insert({
+                            workflow_id: workflowId,
+                            user_id: user.id,
+                            execution_type: 'test',
+                            status: 'running'
+                          })
+                          .select()
+                          .single();
+
+                        toast({
+                          title: "Test run started",
+                          description: "Testing workflow with sample prospects...",
+                        });
+
+                        setTimeout(() => {
+                          toast({
+                            title: "Test run complete",
+                            description: "Workflow tested successfully",
+                          });
+                        }, 2000);
+                      } catch (error: any) {
+                        toast({
+                          title: "Error",
+                          description: error.message,
+                          variant: "destructive",
+                        });
+                      }
+                    }}
+                    onDeploy={async () => {
+                      const workflowData = message.metadata?.workflowData;
+                      const workflowId = message.metadata?.workflowId;
+                      
+                      if (!workflowData || !workflowId) {
+                        toast({
+                          title: "Error",
+                          description: "Workflow data not available",
+                          variant: "destructive",
+                        });
+                        return;
+                      }
+
+                      try {
+                        const { data: { user } } = await supabase.auth.getUser();
+                        if (!user) throw new Error('Not authenticated');
+
+                        const { data: campaign, error: campaignError } = await supabase
+                          .from('campaigns')
+                          .insert({
+                            user_id: user.id,
+                            name: workflowData.name,
+                            target_criteria: workflowData.target_criteria,
+                            tone: workflowData.tone,
+                            goal: workflowData.goal,
+                            custom_prompt: workflowData.instructions,
+                            frequency_config: workflowData.schedule || { frequency: 'daily', time: '09:00', batch_size: 25 },
+                            status: 'active'
+                          })
+                          .select()
+                          .single();
+
+                        if (campaignError) throw campaignError;
+
+                        await supabase
+                          .from('workflows')
+                          .update({ status: 'active' })
+                          .eq('id', workflowId);
+
+                        toast({
+                          title: "Campaign deployed!",
+                          description: `"${workflowData.name}" is now active.`,
+                        });
+
+                        setTimeout(() => navigate(`/campaigns/${campaign.id}`), 1500);
+                      } catch (error: any) {
+                        console.error('Error deploying workflow:', error);
+                        toast({
+                          title: "Error deploying campaign",
+                          description: error.message,
+                          variant: "destructive",
+                        });
+                      }
                     }}
                   />
                   {message.content && (

@@ -1,7 +1,9 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Edit, Play, Rocket, Target, Mail, Search } from "lucide-react";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Edit, Play, Rocket, Target, Mail, Search, Clock, FileText, ChevronDown } from "lucide-react";
+import { useState } from "react";
 
 interface WorkflowStep {
   action: "find_prospects" | "generate_email" | "send_email";
@@ -11,6 +13,7 @@ interface WorkflowStep {
 interface WorkflowData {
   id?: string;
   name: string;
+  description?: string;
   goal: "meeting" | "demo" | "call" | "information";
   target_criteria: {
     job_titles?: string[];
@@ -19,6 +22,12 @@ interface WorkflowData {
     company_size?: string;
   };
   tone: "professional" | "casual";
+  instructions?: string;
+  schedule?: {
+    frequency: "daily" | "weekly" | "monthly";
+    time: string;
+    batch_size: number;
+  };
   steps: WorkflowStep[];
 }
 
@@ -56,6 +65,8 @@ const getGoalBadge = (goal: WorkflowData["goal"]) => {
 };
 
 export function WorkflowCard({ workflow, onEdit, onTestRun, onDeploy }: WorkflowCardProps) {
+  const [instructionsExpanded, setInstructionsExpanded] = useState(false);
+  
   return (
     <Card className="border-2 border-primary/20 bg-gradient-to-br from-background to-muted/20">
       <CardHeader>
@@ -66,8 +77,31 @@ export function WorkflowCard({ workflow, onEdit, onTestRun, onDeploy }: Workflow
           </div>
           {getGoalBadge(workflow.goal)}
         </div>
+        {workflow.description && (
+          <p className="text-sm text-muted-foreground mt-2">{workflow.description}</p>
+        )}
       </CardHeader>
       <CardContent className="space-y-6">
+        {/* Schedule Section */}
+        {workflow.schedule && (
+          <div className="space-y-2">
+            <h4 className="font-semibold text-sm text-muted-foreground flex items-center gap-2">
+              <Clock className="h-4 w-4" />
+              Schedule
+            </h4>
+            <div className="flex items-center gap-3 flex-wrap">
+              <Badge variant="secondary" className="capitalize">
+                {workflow.schedule.frequency}
+              </Badge>
+              <span className="text-sm text-muted-foreground">
+                at {workflow.schedule.time}
+              </span>
+              <span className="text-sm text-muted-foreground">
+                • {workflow.schedule.batch_size} prospects per run
+              </span>
+            </div>
+          </div>
+        )}
         {/* Target Audience */}
         <div className="space-y-2">
           <h4 className="font-semibold text-sm text-muted-foreground">Target Audience</h4>
@@ -120,6 +154,36 @@ export function WorkflowCard({ workflow, onEdit, onTestRun, onDeploy }: Workflow
             ))}
           </div>
         </div>
+
+        {/* Instructions/Mega-prompt Section */}
+        {workflow.instructions && (
+          <div className="space-y-2">
+            <h4 className="font-semibold text-sm text-muted-foreground flex items-center gap-2">
+              <FileText className="h-4 w-4" />
+              Campaign Instructions
+            </h4>
+            <Collapsible open={instructionsExpanded} onOpenChange={setInstructionsExpanded}>
+              <div className="bg-muted/30 rounded-lg p-3">
+                <CollapsibleContent className="space-y-2">
+                  <p className="text-sm whitespace-pre-wrap leading-relaxed">
+                    {workflow.instructions}
+                  </p>
+                </CollapsibleContent>
+                {!instructionsExpanded && (
+                  <p className="text-sm text-muted-foreground line-clamp-3">
+                    {workflow.instructions}
+                  </p>
+                )}
+                <CollapsibleTrigger asChild>
+                  <Button variant="ghost" size="sm" className="w-full mt-2 h-8">
+                    <ChevronDown className={`h-4 w-4 mr-2 transition-transform ${instructionsExpanded ? 'rotate-180' : ''}`} />
+                    {instructionsExpanded ? 'Show less' : 'Show more'}
+                  </Button>
+                </CollapsibleTrigger>
+              </div>
+            </Collapsible>
+          </div>
+        )}
 
         {/* Details */}
         <div className="flex items-center gap-4 text-sm text-muted-foreground">

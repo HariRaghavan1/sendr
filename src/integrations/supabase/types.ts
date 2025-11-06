@@ -452,6 +452,119 @@ export type Database = {
         }
         Relationships: []
       }
+      workflow_executions: {
+        Row: {
+          campaign_id: string | null
+          completed_at: string | null
+          emails_generated: number | null
+          emails_sent: number | null
+          error_message: string | null
+          execution_log: Json | null
+          execution_type: string
+          id: string
+          prospects_found: number | null
+          started_at: string | null
+          status: string
+          user_id: string
+          workflow_id: string | null
+        }
+        Insert: {
+          campaign_id?: string | null
+          completed_at?: string | null
+          emails_generated?: number | null
+          emails_sent?: number | null
+          error_message?: string | null
+          execution_log?: Json | null
+          execution_type?: string
+          id?: string
+          prospects_found?: number | null
+          started_at?: string | null
+          status?: string
+          user_id: string
+          workflow_id?: string | null
+        }
+        Update: {
+          campaign_id?: string | null
+          completed_at?: string | null
+          emails_generated?: number | null
+          emails_sent?: number | null
+          error_message?: string | null
+          execution_log?: Json | null
+          execution_type?: string
+          id?: string
+          prospects_found?: number | null
+          started_at?: string | null
+          status?: string
+          user_id?: string
+          workflow_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workflow_executions_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workflow_executions_workflow_id_fkey"
+            columns: ["workflow_id"]
+            isOneToOne: false
+            referencedRelation: "workflows"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      workflows: {
+        Row: {
+          conversation_id: string | null
+          created_at: string | null
+          description: string | null
+          id: string
+          instructions: string
+          name: string
+          schedule_config: Json
+          status: string | null
+          updated_at: string | null
+          user_id: string
+          workflow_config: Json
+        }
+        Insert: {
+          conversation_id?: string | null
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          instructions: string
+          name: string
+          schedule_config?: Json
+          status?: string | null
+          updated_at?: string | null
+          user_id: string
+          workflow_config: Json
+        }
+        Update: {
+          conversation_id?: string | null
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          instructions?: string
+          name?: string
+          schedule_config?: Json
+          status?: string | null
+          updated_at?: string | null
+          user_id?: string
+          workflow_config?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workflows_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "campaign_conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
