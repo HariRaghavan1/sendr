@@ -525,6 +525,44 @@ serve(async (req) => {
               `[3/3] ✅ OpenAI: Generated email ${i + 1}/${prospects.length} (Quality: ${qualityScore})`
             );
 
+            // First, save prospect to database to get a proper UUID
+            let prospectUuid = prospect.id;
+            
+            // Check if prospect.id is already a UUID
+            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+            
+            if (!uuidRegex.test(prospect.id)) {
+              // Prospect ID is not a UUID (likely from Clado), save prospect to get UUID
+              console.log('Saving prospect to database:', prospect.name);
+              
+              const { data: savedProspect, error: prospectError } = await supabase
+                .from('prospects')
+                .insert({
+                  campaign_id: workflow.id,
+                  user_id: user.id,
+                  name: prospect.name,
+                  email: prospect.email || '',
+                  title: prospect.title || '',
+                  company: prospect.company || '',
+                  linkedin_url: prospect.linkedin_url || '',
+                  enrichment_data: {
+                    clado_id: prospect.id,
+                    found_at: new Date().toISOString()
+                  },
+                  status: 'pending'
+                })
+                .select()
+                .single();
+
+              if (prospectError) {
+                console.error('Failed to save prospect:', prospectError);
+                throw new Error(`Failed to save prospect: ${prospectError.message}`);
+              }
+
+              prospectUuid = savedProspect.id;
+              console.log('Saved prospect with UUID:', prospectUuid);
+            }
+
             // Save email to database first
             let savedEmail = null;
             let sendStatus = 'skipped';
@@ -545,7 +583,7 @@ serve(async (req) => {
               const { data: email, error: saveError } = await supabase
                 .from('emails')
                 .insert({
-                  prospect_id: prospect.id,
+                  prospect_id: prospectUuid,
                   campaign_id: workflow.id,
                   user_id: user.id,
                   subject: subject,
