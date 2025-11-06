@@ -49,38 +49,54 @@ serve(async (req) => {
     // Add initial log
     await updateExecutionLog(supabase, execution_id, 'Test run started');
 
+    // Get user's Clado API key for prospect search
+    const { data: settings } = await supabase
+      .from('user_settings')
+      .select('clado_api_key')
+      .eq('user_id', user.id)
+      .single();
+
+    if (!settings?.clado_api_key) {
+      await failExecution(supabase, execution_id, 'Clado API key not configured. Please add it in Settings.');
+      return new Response(
+        JSON.stringify({ error: 'Clado API key not configured' }),
+        { 
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        }
+      );
+    }
+
     // Find prospects (limit to 5 for test runs)
-    await updateExecutionLog(supabase, execution_id, 'Finding prospects...');
+    await updateExecutionLog(supabase, execution_id, 'Finding prospects using Clado API...');
     
-    // For test runs, create mock prospects instead of calling external API
-    const mockProspects = [
-      {
-        id: crypto.randomUUID(),
-        name: 'Dr. Sarah Johnson',
-        email: 'sarah.johnson@example.edu',
-        title: 'Associate Professor',
-        company: 'University of California',
-        linkedin_url: 'https://linkedin.com/in/sarahjohnson',
+    const cladoResponse = await fetch('https://api.clado.ai/v1/search', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${settings.clado_api_key}`,
+        'Content-Type': 'application/json',
       },
-      {
-        id: crypto.randomUUID(),
-        name: 'Prof. Michael Chen',
-        email: 'michael.chen@example.edu',
-        title: 'Professor',
-        company: 'Stanford University',
-        linkedin_url: 'https://linkedin.com/in/michaelchen',
-      },
-      {
-        id: crypto.randomUUID(),
-        name: 'Dr. Emily Rodriguez',
-        email: 'emily.rodriguez@example.edu',
-        title: 'Assistant Professor',
-        company: 'MIT',
-        linkedin_url: 'https://linkedin.com/in/emilyrodriguez',
-      },
-    ];
-    
-    const prospects = mockProspects;
+      body: JSON.stringify({
+        criteria: targetCriteria,
+        limit: 5, // Limit to 5 for test runs
+      }),
+    });
+
+    if (!cladoResponse.ok) {
+      const errorText = await cladoResponse.text();
+      await failExecution(supabase, execution_id, `Failed to find prospects: ${errorText}`);
+      throw new Error(`Clado API error: ${errorText}`);
+    }
+
+    const cladoData = await cladoResponse.json();
+    const prospects = (cladoData.results || []).map((result: any) => ({
+      id: crypto.randomUUID(),
+      name: result.name || 'Unknown',
+      email: result.email || '',
+      title: result.title || '',
+      company: result.company || '',
+      linkedin_url: result.linkedin_url || '',
+    }));
 
     if (prospects.length === 0) {
       await updateExecutionLog(supabase, execution_id, 'No prospects found matching criteria');
