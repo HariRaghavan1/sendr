@@ -82,7 +82,7 @@ const ConversationView = () => {
             'Authorization': `Bearer ${session.data.session?.access_token}`,
           },
           body: JSON.stringify({
-            messages: newMessages.filter(msg => msg.content != null && msg.content !== '')
+            messages: newMessages.filter(msg => msg && msg.content != null && msg.content !== '')
           }),
         }
       );
