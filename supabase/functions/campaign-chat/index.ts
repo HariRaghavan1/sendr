@@ -38,7 +38,7 @@ serve(async (req) => {
       .from('user_settings')
       .select('openai_api_key')
       .eq('user_id', user.id)
-      .single();
+      .maybeSingle();
 
     if (settingsError || !settings?.openai_api_key) {
       throw new Error('OpenAI API key not configured. Please add it in Settings.');
@@ -131,7 +131,7 @@ Be friendly, concise, and helpful.`
             }
           }
         ],
-        stream: true,
+        // no streaming to avoid org verification requirement
       }),
     });
 
@@ -141,9 +141,13 @@ Be friendly, concise, and helpful.`
       throw new Error(`OpenAI API error: ${errorText}`);
     }
 
-    // Handle tool calls in streaming
-    return new Response(response.body, {
-      headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
+    const data = await response.json();
+    const message = data.choices?.[0]?.message || {};
+    const content = message.content || '';
+    const tool_calls = message.tool_calls || [];
+
+    return new Response(JSON.stringify({ content, tool_calls }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
 
   } catch (error) {

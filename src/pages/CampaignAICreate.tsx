@@ -52,55 +52,17 @@ const CampaignAICreate = () => {
         }
       );
 
-      if (!response.ok || !response.body) throw new Error('Failed to get response');
+      if (!response.ok) {
+        const err = await response.json().catch(() => null);
+        throw new Error(err?.error || 'Failed to get response');
+      }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let assistantMessage = '';
-      let buffer = '';
-      let toolCalls: any[] = [];
+      const result = await response.json();
+      const assistantText: string = result.content || '';
+      const toolCalls: any[] = result.tool_calls || [];
 
-      setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        let newlineIndex: number;
-
-        while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
-          let line = buffer.slice(0, newlineIndex);
-          buffer = buffer.slice(newlineIndex + 1);
-
-          if (line.endsWith('\r')) line = line.slice(0, -1);
-          if (line.startsWith(':') || line.trim() === '') continue;
-          if (!line.startsWith('data: ')) continue;
-
-          const jsonStr = line.slice(6).trim();
-          if (jsonStr === '[DONE]') break;
-
-          try {
-            const parsed = JSON.parse(jsonStr);
-            const delta = parsed.choices?.[0]?.delta;
-            
-            if (delta?.content) {
-              assistantMessage += delta.content;
-              setMessages(prev => {
-                const newMsgs = [...prev];
-                newMsgs[newMsgs.length - 1] = { role: 'assistant', content: assistantMessage };
-                return newMsgs;
-              });
-            }
-
-            if (delta?.tool_calls) {
-              toolCalls.push(...delta.tool_calls);
-            }
-          } catch {
-            buffer = line + '\n' + buffer;
-            break;
-          }
-        }
+      if (assistantText) {
+        setMessages(prev => [...prev, { role: 'assistant', content: assistantText }]);
       }
 
       // Handle tool calls (campaign creation)
