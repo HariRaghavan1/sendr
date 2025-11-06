@@ -568,8 +568,7 @@ serve(async (req) => {
           await supabase
             .from('workflow_executions')
             .update({ 
-              emails_generated: successCount,
-              execution_log: [] // Will be populated by updateExecutionLog
+              emails_generated: successCount
             })
             .eq('id', execution_id);
         }
@@ -611,11 +610,11 @@ serve(async (req) => {
 async function updateExecutionLog(supabase: any, executionId: string, message: string) {
   const { data: execution } = await supabase
     .from('workflow_executions')
-    .select('execution_log')
+    .select('progress_logs')
     .eq('id', executionId)
     .single();
 
-  const logs = execution?.execution_log || [];
+  const logs = execution?.progress_logs || [];
   logs.push({
     message,
     timestamp: new Date().toISOString(),
@@ -623,7 +622,7 @@ async function updateExecutionLog(supabase: any, executionId: string, message: s
 
   await supabase
     .from('workflow_executions')
-    .update({ execution_log: logs })
+    .update({ progress_logs: logs })
     .eq('id', executionId);
 }
 
