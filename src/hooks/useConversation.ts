@@ -1,9 +1,15 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 
-interface Message {
+export interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
+  metadata?: {
+    type?: 'workflow' | 'campaign';
+    workflowId?: string;
+    workflowData?: any;
+    campaignId?: string;
+  };
 }
 
 export const useConversation = (conversationId?: string) => {

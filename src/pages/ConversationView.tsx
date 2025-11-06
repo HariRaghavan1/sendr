@@ -4,13 +4,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { useConversation } from "@/hooks/useConversation";
-import { Send, Sparkles, Loader2, Play } from "lucide-react";
-
-interface Message {
-  role: 'user' | 'assistant';
-  content: string;
-}
+import { useConversation, Message } from "@/hooks/useConversation";
+import { Send, Sparkles, Loader2 } from "lucide-react";
+import { WorkflowCard } from "@/components/WorkflowCard";
 
 const ConversationView = () => {
   const { conversationId } = useParams();
@@ -62,6 +58,11 @@ const ConversationView = () => {
         await saveMessage(convId, 'user', userMessage);
       }
 
+      // Add placeholder for streaming assistant message
+      const assistantMessageIndex = newMessages.length;
+      setMessages([...newMessages, { role: 'assistant', content: '' }]);
+
+      // Stream response from edge function
       const response = await fetch(
         `https://tbbyxprlgrsrzvxvkpgz.supabase.co/functions/v1/campaign-chat`,
         {
@@ -75,76 +76,166 @@ const ConversationView = () => {
       );
 
       if (!response.ok) {
+        if (response.status === 429) {
+          throw new Error('Rate limit exceeded. Please try again in a moment.');
+        }
+        if (response.status === 402) {
+          throw new Error('AI credits exhausted. Please add credits in Settings.');
+        }
         const err = await response.json().catch(() => null);
         throw new Error(err?.error || 'Failed to get response');
       }
 
-      const result = await response.json();
-      const assistantText: string = result.content || '';
-      const toolCalls: any[] = result.tool_calls || [];
+      if (!response.body) throw new Error('No response body');
 
-      if (assistantText) {
-        setMessages(prev => [...prev, { role: 'assistant', content: assistantText }]);
-        if (convId) {
-          await saveMessage(convId, 'assistant', assistantText);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let textBuffer = '';
+      let streamedContent = '';
+      let accumulatedToolCalls: any[] = [];
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        textBuffer += decoder.decode(value, { stream: true });
+
+        let newlineIndex: number;
+        while ((newlineIndex = textBuffer.indexOf('\n')) !== -1) {
+          let line = textBuffer.slice(0, newlineIndex);
+          textBuffer = textBuffer.slice(newlineIndex + 1);
+
+          if (line.endsWith('\r')) line = line.slice(0, -1);
+          if (line.startsWith(':') || line.trim() === '') continue;
+          if (!line.startsWith('data: ')) continue;
+
+          const jsonStr = line.slice(6).trim();
+          if (jsonStr === '[DONE]') break;
+
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const content = parsed.choices?.[0]?.delta?.content as string | undefined;
+            const newToolCalls = parsed.choices?.[0]?.delta?.tool_calls;
+
+            if (content) {
+              streamedContent += content;
+              setMessages(prev => {
+                const updated = [...prev];
+                updated[assistantMessageIndex] = {
+                  role: 'assistant',
+                  content: streamedContent
+                };
+                return updated;
+              });
+            }
+
+            if (newToolCalls) {
+              accumulatedToolCalls = newToolCalls;
+            }
+          } catch {
+            // Incomplete JSON, put it back
+            textBuffer = line + '\n' + textBuffer;
+            break;
+          }
         }
       }
 
-      if (toolCalls.length > 0) {
-        const toolCall = toolCalls.find(tc => tc.function?.name === 'create_campaign');
-        if (toolCall?.function?.arguments) {
-          try {
-            const config = JSON.parse(toolCall.function.arguments);
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) throw new Error('Not authenticated');
+      // Save the final assistant message
+      if (convId) {
+        await saveMessage(convId, 'assistant', streamedContent || 'I can help you create a campaign.');
+      }
 
-            const { data: campaign, error: campaignError } = await supabase
-              .from('campaigns')
-              .insert({
-                user_id: user.id,
-                name: config.name,
-                target_criteria: config.target_criteria,
-                tone: config.tone,
-                goal: config.goal,
-                custom_prompt: config.custom_prompt,
-                status: 'draft'
-              })
-              .select()
-              .single();
+      // Handle tool calls
+      if (accumulatedToolCalls && accumulatedToolCalls.length > 0) {
+        for (const toolCall of accumulatedToolCalls) {
+          if (toolCall.function?.name === 'create_campaign') {
+            try {
+              const config = JSON.parse(toolCall.function.arguments);
+              const { data: { user } } = await supabase.auth.getUser();
+              if (!user) throw new Error('Not authenticated');
 
-            if (campaignError) throw campaignError;
+              const { data: campaign, error: campaignError } = await supabase
+                .from('campaigns')
+                .insert({
+                  user_id: user.id,
+                  name: config.name,
+                  target_criteria: config.target_criteria,
+                  tone: config.tone,
+                  goal: config.goal,
+                  custom_prompt: config.custom_prompt,
+                  status: 'draft'
+                })
+                .select()
+                .single();
 
-            // Link conversation to campaign
-            if (convId) {
-              await supabase
-                .from('campaign_conversations')
-                .update({ campaign_id: campaign.id })
-                .eq('id', convId);
+              if (campaignError) throw campaignError;
+
+              if (convId) {
+                await supabase
+                  .from('campaign_conversations')
+                  .update({ campaign_id: campaign.id })
+                  .eq('id', convId);
+              }
+
+              toast({
+                title: "Campaign created!",
+                description: `"${config.name}" has been created successfully.`,
+              });
+
+              setTimeout(() => navigate(`/campaigns/${campaign.id}`), 2000);
+            } catch (error: any) {
+              console.error('Error creating campaign:', error);
+              toast({
+                title: "Error creating campaign",
+                description: error.message,
+                variant: "destructive",
+              });
             }
-
-            const successMsg = `Perfect! I've created your campaign "${config.name}". You can test it or view details.`;
-            setMessages(prev => [...prev, {
-              role: 'assistant',
-              content: successMsg
-            }]);
-
-            if (convId) {
-              await saveMessage(convId, 'assistant', successMsg);
+          } else if (toolCall.function?.name === 'create_workflow') {
+            try {
+              const workflowData = JSON.parse(toolCall.function.arguments);
+              workflowData.id = `workflow_${Date.now()}`;
+              
+              setMessages(prev => {
+                const updated = [...prev];
+                updated[assistantMessageIndex] = {
+                  ...updated[assistantMessageIndex],
+                  metadata: {
+                    type: 'workflow',
+                    workflowData
+                  }
+                };
+                return updated;
+              });
+            } catch (error) {
+              console.error('Error parsing workflow:', error);
             }
-
-            toast({
-              title: "Campaign created!",
-              description: `"${config.name}" has been created successfully.`,
-            });
-
-            setTimeout(() => navigate(`/campaigns/${campaign.id}`), 2000);
-          } catch (error: any) {
-            console.error('Error creating campaign:', error);
-            toast({
-              title: "Error creating campaign",
-              description: error.message,
-              variant: "destructive",
-            });
+          } else if (toolCall.function?.name === 'update_workflow') {
+            try {
+              const { workflow_id, updates } = JSON.parse(toolCall.function.arguments);
+              
+              setMessages(prev => {
+                const updated = [...prev];
+                for (let i = updated.length - 1; i >= 0; i--) {
+                  if (updated[i].metadata?.type === 'workflow' && updated[i].metadata?.workflowData?.id === workflow_id) {
+                    updated[i] = {
+                      ...updated[i],
+                      metadata: {
+                        ...updated[i].metadata,
+                        workflowData: {
+                          ...updated[i].metadata!.workflowData,
+                          ...updates
+                        }
+                      }
+                    };
+                    break;
+                  }
+                }
+                return updated;
+              });
+            } catch (error) {
+              console.error('Error updating workflow:', error);
+            }
           }
         }
       }
@@ -153,7 +244,7 @@ const ConversationView = () => {
       console.error('Error in chat:', error);
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: 'Sorry, I encountered an error. Please try again.'
+        content: error.message || 'Sorry, I encountered an error. Please try again.'
       }]);
       toast({
         title: "Error",
@@ -190,15 +281,31 @@ const ConversationView = () => {
               key={index}
               className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
-              <div
-                className={`max-w-[80%] rounded-2xl px-5 py-3.5 shadow-sm ${
-                  message.role === 'user'
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-card border border-border'
-                }`}
-              >
-                <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p>
-              </div>
+              {message.role === 'assistant' && message.metadata?.type === 'workflow' ? (
+                <div className="max-w-[90%] space-y-3">
+                  <WorkflowCard 
+                    workflow={message.metadata.workflowData}
+                    onEdit={() => {
+                      setInput(`Update the workflow: `);
+                    }}
+                  />
+                  {message.content && (
+                    <div className="bg-card border border-border rounded-2xl px-5 py-3.5 shadow-sm">
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div
+                  className={`max-w-[80%] rounded-2xl px-5 py-3.5 shadow-sm ${
+                    message.role === 'user'
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-card border border-border'
+                  }`}
+                >
+                  <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p>
+                </div>
+              )}
             </div>
           ))}
           {loading && (

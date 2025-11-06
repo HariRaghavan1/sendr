@@ -34,38 +34,44 @@ serve(async (req) => {
       throw new Error('User not authenticated');
     }
 
-    const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
-    if (!OPENAI_API_KEY) {
-      throw new Error('OpenAI API key not configured');
+    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+    if (!LOVABLE_API_KEY) {
+      throw new Error('Lovable AI key not configured');
     }
 
     console.log('Campaign chat - messages count:', messages.length);
 
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'gpt-5-mini-2025-08-07',
+        model: 'google/gemini-2.5-flash',
         messages: [
           {
             role: 'system',
-            content: `You are an efficient AI assistant for creating email outreach campaigns. Your goal is to gather the MINIMUM information needed and create campaigns QUICKLY.
+            content: `You are an efficient AI assistant for creating email outreach campaigns and workflows. Your goal is to help users build campaigns QUICKLY and VISUALLY.
 
-REQUIRED INFO (ask for these first):
+WHEN USER DESCRIBES A WORKFLOW (e.g., "find professors to do research", "reach out to investors"):
+1. Immediately create a visual workflow using create_workflow tool
+2. Ask 1-2 clarifying questions about target criteria
+3. Update the workflow using update_workflow tool based on their responses
+4. Show the workflow so users can see what they're building
+
+REQUIRED INFO for campaigns:
 - Target audience (job titles, industry, or company type)
 - Campaign goal (meeting, demo, call, or information)
 
-OPTIONAL INFO (use smart defaults if not provided):
+OPTIONAL INFO (use smart defaults):
 - Tone: default to "casual" if not specified
 - Location: default to "United States" if not specified
 - Company size: default to "50-200 employees" if not specified
 
 WORKFLOW:
-1. If user provides target audience in their first message, ask about their goal
-2. Once you have target + goal, CREATE THE CAMPAIGN immediately using the tool
+1. If user provides target audience, ask about their goal
+2. Once you have target + goal, CREATE immediately using the appropriate tool
 3. Use reasonable defaults for any missing details
 4. Keep it to 2-3 messages MAX
 
@@ -127,25 +133,121 @@ Be direct and action-oriented. Don't ask unnecessary questions.`
                 required: ["name", "target_criteria", "tone", "goal"]
               }
             }
+          },
+          {
+            type: "function",
+            function: {
+              name: "create_workflow",
+              description: "Create a visual workflow for complex campaigns. Use this when user describes a multi-step outreach process.",
+              parameters: {
+                type: "object",
+                properties: {
+                  name: { 
+                    type: "string", 
+                    description: "Descriptive workflow name" 
+                  },
+                  goal: {
+                    type: "string",
+                    enum: ["meeting", "demo", "call", "information"],
+                    description: "Campaign goal"
+                  },
+                  target_criteria: {
+                    type: "object",
+                    description: "Target audience criteria",
+                    properties: {
+                      job_titles: { type: "array", items: { type: "string" } },
+                      industry: { type: "string" },
+                      location: { type: "string" },
+                      company_size: { type: "string" }
+                    }
+                  },
+                  tone: {
+                    type: "string",
+                    enum: ["professional", "casual"],
+                    description: "Email tone"
+                  },
+                  steps: {
+                    type: "array",
+                    description: "Workflow steps",
+                    items: {
+                      type: "object",
+                      properties: {
+                        action: { 
+                          type: "string",
+                          enum: ["find_prospects", "generate_email", "send_email"],
+                          description: "Step action"
+                        },
+                        description: { type: "string" }
+                      }
+                    }
+                  }
+                },
+                required: ["name", "goal", "target_criteria", "steps"]
+              }
+            }
+          },
+          {
+            type: "function",
+            function: {
+              name: "update_workflow",
+              description: "Update an existing workflow based on user feedback",
+              parameters: {
+                type: "object",
+                properties: {
+                  workflow_id: { 
+                    type: "string",
+                    description: "ID of workflow to update"
+                  },
+                  updates: {
+                    type: "object",
+                    description: "Fields to update (partial workflow object)",
+                    properties: {
+                      name: { type: "string" },
+                      target_criteria: { type: "object" },
+                      tone: { type: "string" },
+                      goal: { type: "string" },
+                      steps: { type: "array" }
+                    }
+                  }
+                },
+                required: ["workflow_id", "updates"]
+              }
+            }
           }
         ],
-        // no streaming to avoid org verification requirement
+        stream: true
       }),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('OpenAI API error:', response.status, errorText);
-      throw new Error(`OpenAI API error: ${errorText}`);
+      console.error('Lovable AI error:', response.status, errorText);
+      
+      if (response.status === 429) {
+        return new Response(JSON.stringify({ error: 'Rate limit exceeded. Please try again in a moment.' }), {
+          status: 429,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      
+      if (response.status === 402) {
+        return new Response(JSON.stringify({ error: 'AI credits exhausted. Please add credits in Settings.' }), {
+          status: 402,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      
+      throw new Error(`Lovable AI error: ${errorText}`);
     }
 
-    const data = await response.json();
-    const message = data.choices?.[0]?.message || {};
-    const content = message.content || '';
-    const tool_calls = message.tool_calls || [];
-
-    return new Response(JSON.stringify({ content, tool_calls }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    // Return streaming response
+    return new Response(response.body, {
+      headers: { 
+        ...corsHeaders, 
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive'
+      },
     });
 
   } catch (error) {
