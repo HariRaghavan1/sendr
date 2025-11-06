@@ -870,18 +870,29 @@ try {
                           if (error) {
                             console.error('Error executing workflow:', error);
 
+                            // Check for Gmail connection error
+                            const isGmailError = error.message?.includes('GMAIL_NOT_CONNECTED');
+
                             // Check if error is due to function not being deployed
                             const isDeploymentError = error.message?.includes('404') ||
                                                      error.message?.includes('not found') ||
                                                      error.message?.includes('FunctionsRelayError');
 
-                            toast({
-                              title: isDeploymentError ? "Edge Function Not Deployed" : "Execution Error",
-                              description: isDeploymentError
-                                ? "The execute-workflow function hasn't been deployed to Supabase. Please deploy it using: supabase functions deploy execute-workflow"
-                                : error.message,
-                              variant: "destructive",
-                            });
+                            if (isGmailError) {
+                              toast({
+                                title: "Gmail Not Connected",
+                                description: "Please connect your Gmail account in the chat to send emails.",
+                                variant: "destructive",
+                              });
+                            } else {
+                              toast({
+                                title: isDeploymentError ? "Edge Function Not Deployed" : "Execution Error",
+                                description: isDeploymentError
+                                  ? "The execute-workflow function hasn't been deployed to Supabase. Please deploy it using: supabase functions deploy execute-workflow"
+                                  : error.message,
+                                variant: "destructive",
+                              });
+                            }
                           }
                         });
 

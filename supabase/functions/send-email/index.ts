@@ -92,7 +92,7 @@ serve(async (req) => {
         throw new Error('Composio authentication failed. Please check your API key in Settings.');
       } else if (composioResponse.status === 403 || composioResponse.status === 404) {
         // Gmail not connected - this should trigger connect_gmail in chat
-        throw new Error('GMAIL_NOT_CONNECTED: Please connect your Gmail account to send emails.');
+        throw new Error('GMAIL_NOT_CONNECTED: Your Gmail account is not connected or authentication has expired. Please reconnect your Gmail account to send emails.');
       } else if (composioResponse.status === 429) {
         throw new Error('Rate limit exceeded. Please wait and try again.');
       }
