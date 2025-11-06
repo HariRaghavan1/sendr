@@ -93,7 +93,7 @@ serve(async (req) => {
 
     // Parse and validate request body
     const requestBody = await req.json();
-    const { workflow_id, execution_id, max_prospects, skip_sending } = validateInput(ExecuteWorkflowSchema, requestBody);
+    const { workflow_id, campaign_id, execution_id, max_prospects, skip_sending } = validateInput(ExecuteWorkflowSchema, requestBody);
 
     // Set defaults and clamp max_prospects
     const limit = Math.max(1, Math.min(25, max_prospects || 5));
@@ -547,7 +547,7 @@ serve(async (req) => {
               const { data: savedProspect, error: prospectError } = await supabase
                 .from('prospects')
                 .insert({
-                  campaign_id: workflow.id,
+                  campaign_id: campaign_id,
                   user_id: user.id,
                   name: prospect.name,
                   email: prospect.email || '',
@@ -600,7 +600,7 @@ serve(async (req) => {
                 .from('emails')
                 .insert({
                   prospect_id: prospectUuid,
-                  campaign_id: workflow.id,
+                  campaign_id: campaign_id,
                   user_id: user.id,
                   subject: subject,
                   body: body,

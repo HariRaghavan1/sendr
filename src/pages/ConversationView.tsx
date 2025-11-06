@@ -383,11 +383,25 @@ try {
                 console.log('Found workflow ID:', workflow_id);
               }
 
+              // Find the campaign_id for this workflow by looking at the conversation
+              const { data: conversation, error: convError } = await supabase
+                .from('campaign_conversations')
+                .select('campaign_id')
+                .eq('id', convId)
+                .single();
+
+              if (convError || !conversation?.campaign_id) {
+                throw new Error('Campaign not found for this workflow. Please create the campaign first.');
+              }
+
+              const campaign_id = conversation.campaign_id;
+
               // Create workflow execution
               const { data: execution, error: execError } = await supabase
                 .from('workflow_executions')
                 .insert({
                   workflow_id,
+                  campaign_id,
                   user_id: user.id,
                   execution_type: 'manual',
                   status: 'running',
@@ -421,10 +435,11 @@ try {
                 );
               }
 
-              // Trigger execution with max_prospects and skip_sending
+              // Trigger execution with campaign_id, max_prospects and skip_sending
               supabase.functions.invoke('execute-workflow', {
                 body: { 
                   workflow_id, 
+                  campaign_id,
                   execution_id: execution.id,
                   max_prospects,
                   skip_sending

@@ -12,6 +12,7 @@ import { z } from 'https://esm.sh/zod@3.25.76';
 export const ExecuteWorkflowSchema = z.object({
   workflow_id: z.string().uuid('Invalid workflow ID format'),
   execution_id: z.string().uuid('Invalid execution ID format'),
+  campaign_id: z.string().uuid('Invalid campaign ID format'),
   max_prospects: z.number()
     .int('Max prospects must be an integer')
     .min(1, 'Max prospects must be at least 1')

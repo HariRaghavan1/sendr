@@ -282,7 +282,7 @@ Be direct and action-oriented. Don't ask unnecessary questions.`
             type: "function",
             function: {
               name: "run_test",
-              description: "Run a test execution of a workflow with specified parameters. Use this when user wants to test a campaign. IMPORTANT: workflow_id must be the UUID returned from create_workflow, NOT the workflow name.",
+              description: "Run a test execution of a workflow with specified parameters. Use this when user wants to test a campaign. IMPORTANT: workflow_id must be the UUID returned from create_workflow, NOT the workflow name. Note: Workflows are automatically linked to campaigns, so the system will find the associated campaign_id.",
               parameters: {
                 type: "object",
                 properties: {
