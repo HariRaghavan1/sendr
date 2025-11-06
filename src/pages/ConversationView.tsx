@@ -8,6 +8,7 @@ import { useConversation, Message } from "@/hooks/useConversation";
 import { Send, Sparkles, Loader2 } from "lucide-react";
 import { WorkflowCard } from "@/components/WorkflowCard";
 import { ExecutionMonitor } from "@/components/ExecutionMonitor";
+import { TemplateCard } from "@/components/TemplateCard";
 
 const ConversationView = () => {
   const { conversationId } = useParams();
@@ -348,6 +349,150 @@ try {
             } catch (error) {
               console.error('Error parsing workflow:', error);
             }
+          } else if (toolCall.function?.name === 'run_test') {
+            try {
+              const params = JSON.parse(toolCall.function.arguments);
+              const { workflow_id, max_prospects = 5, skip_sending = true } = params;
+              const { data: { user } } = await supabase.auth.getUser();
+              if (!user) throw new Error('Not authenticated');
+
+              // Create workflow execution
+              const { data: execution, error: execError } = await supabase
+                .from('workflow_executions')
+                .insert({
+                  workflow_id,
+                  user_id: user.id,
+                  execution_type: 'manual',
+                  status: 'running',
+                  prospects_found: 0,
+                  emails_generated: 0,
+                  emails_sent: 0,
+                })
+                .select()
+                .single();
+
+              if (execError) throw execError;
+
+              // Add ExecutionMonitor to chat
+              const execMessage: Message = {
+                role: 'assistant' as const,
+                content: `Starting test run with ${max_prospects} prospects...`,
+                metadata: {
+                  type: 'execution' as const,
+                  executionId: execution.id
+                }
+              };
+              setMessages(prev => [...prev, execMessage]);
+
+              // Trigger execution
+              await supabase.functions.invoke('execute-workflow', {
+                body: { workflow_id, execution_id: execution.id }
+              });
+
+              finalAssistantContent = `Test run started for ${max_prospects} prospects. ${skip_sending ? 'Emails will not be sent (dry run).' : 'Emails will be sent.'}`;
+            } catch (error: any) {
+              console.error('Error starting test run:', error);
+              toast({
+                title: "Error starting test",
+                description: error.message,
+                variant: "destructive",
+              });
+            }
+          } else if (toolCall.function?.name === 'add_email_template') {
+            try {
+              const templateData = JSON.parse(toolCall.function.arguments);
+              const { data: { user } } = await supabase.auth.getUser();
+              if (!user) throw new Error('Not authenticated');
+
+              const { data: template, error: templateError } = await supabase
+                .from('email_templates')
+                .insert({
+                  user_id: user.id,
+                  workflow_id: templateData.workflow_id,
+                  name: templateData.name,
+                  subject: templateData.subject,
+                  body: templateData.body,
+                  components: templateData.components || {}
+                })
+                .select()
+                .single();
+
+              if (templateError) throw templateError;
+
+              // Add TemplateCard to chat
+              setMessages(prev => {
+                const updated = [...prev];
+                updated[assistantMessageIndex] = {
+                  ...updated[assistantMessageIndex],
+                  metadata: {
+                    type: 'template',
+                    templateId: template.id,
+                    templateData: template
+                  }
+                };
+                return updated;
+              });
+
+              toast({
+                title: "Template created!",
+                description: `"${templateData.name}" is ready to use.`,
+              });
+
+              finalAssistantContent = `Created email template "${templateData.name}". You can now use this in your test runs.`;
+            } catch (error: any) {
+              console.error('Error creating template:', error);
+              toast({
+                title: "Error creating template",
+                description: error.message,
+                variant: "destructive",
+              });
+            }
+          } else if (toolCall.function?.name === 'edit_email_template') {
+            try {
+              const { template_id, updates } = JSON.parse(toolCall.function.arguments);
+
+              const { error: updateError } = await supabase
+                .from('email_templates')
+                .update(updates)
+                .eq('id', template_id);
+
+              if (updateError) throw updateError;
+
+              // Update template in messages
+              setMessages(prev => {
+                const updated = [...prev];
+                for (let i = updated.length - 1; i >= 0; i--) {
+                  if (updated[i].metadata?.type === 'template' && updated[i].metadata?.templateId === template_id) {
+                    updated[i] = {
+                      ...updated[i],
+                      metadata: {
+                        ...updated[i].metadata,
+                        templateData: {
+                          ...updated[i].metadata!.templateData,
+                          ...updates
+                        }
+                      }
+                    };
+                    break;
+                  }
+                }
+                return updated;
+              });
+
+              toast({
+                title: "Template updated",
+                description: "Changes saved successfully.",
+              });
+
+              finalAssistantContent = "Template updated successfully.";
+            } catch (error: any) {
+              console.error('Error updating template:', error);
+              toast({
+                title: "Error updating template",
+                description: error.message,
+                variant: "destructive",
+              });
+            }
           } else if (toolCall.function?.name === 'update_workflow') {
             try {
               const { workflow_id, updates } = JSON.parse(toolCall.function.arguments);
@@ -425,9 +570,13 @@ try {
               key={index}
               className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
-              {message.role === 'assistant' && message.metadata?.type === 'workflow' ? (
+              {message.role === 'assistant' && message.metadata?.type === 'template' ? (
                 <div className="max-w-[90%] space-y-3">
-                  <WorkflowCard 
+                  <TemplateCard template={message.metadata.templateData} />
+                </div>
+              ) : message.role === 'assistant' && message.metadata?.type === 'workflow' ? (
+                <div className="max-w-[90%] space-y-3">
+                  <WorkflowCard
                     workflow={message.metadata.workflowData}
                     onEdit={() => {
                       setInput(`Update the workflow: `);

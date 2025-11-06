@@ -55,6 +55,8 @@ serve(async (req) => {
     // Send via Composio using GMAIL_SEND_EMAIL action
     // Note: Users must first connect their Gmail account via Composio dashboard at app.composio.dev
     // and configure an entity_id for multi-user support
+    console.log(`Sending email to ${email.prospects.email} via Composio...`);
+    
     const composioResponse = await fetch('https://backend.composio.dev/api/v2/actions/GMAIL_SEND_EMAIL/execute', {
       method: 'POST',
       headers: {
@@ -73,10 +75,22 @@ serve(async (req) => {
 
     if (!composioResponse.ok) {
       const errorText = await composioResponse.text();
-      throw new Error(`Composio API error: ${errorText}`);
+      console.error('Composio API error:', composioResponse.status, errorText);
+      
+      // Provide helpful error messages
+      if (composioResponse.status === 401) {
+        throw new Error('Composio authentication failed. Please check your API key in Settings.');
+      } else if (composioResponse.status === 403) {
+        throw new Error('Gmail account not connected. Please connect Gmail at app.composio.dev');
+      } else if (composioResponse.status === 429) {
+        throw new Error('Rate limit exceeded. Please wait and try again.');
+      }
+      
+      throw new Error(`Composio API error (${composioResponse.status}): ${errorText}`);
     }
 
     const result = await composioResponse.json();
+    console.log('Email sent successfully via Composio:', result);
 
     // Update email record
     const { error: updateError } = await supabaseClient

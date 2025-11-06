@@ -99,6 +99,30 @@ When creating workflows, generate COMPREHENSIVE instructions that include:
 Example mega-prompt:
 "Target computer science professors at R1 research universities in the US, focusing on those with active AI/ML research groups. Email should be professional but approachable, 3-4 sentences max. Open by referencing a recent paper or research area. Explain our research collaboration opportunity briefly. Close with specific ask for 15-min call. Send daily at 9 AM EST, 25 per batch. Stop if they reply or bounce. Include {first_name}, {university}, {research_area} variables."
 
+RUNNING TEST RUNS:
+When users want to run a test, use the run_test tool. They can specify:
+- Number of prospects (default 5)
+- Whether to use a template
+- Whether to actually send emails (default: skip for testing)
+
+Examples:
+- "Run a test for 3 people" → use run_test with max_prospects: 3
+- "Test this with 10 prospects" → use run_test with max_prospects: 10
+- "Run a test and actually send the emails" → use run_test with skip_sending: false
+
+EMAIL TEMPLATES:
+Users can create email templates with components via chat:
+- "Add a template with background research and opening hook"
+- "Create an email template that focuses on personalization"
+
+Use add_email_template tool to create templates with these components:
+- background_research: Research to do on each prospect
+- opening_hook: How to open the email
+- value_proposition: Main value/benefit
+- personalization_strategy: How to personalize
+- call_to_action: What action to request
+- tone_guidelines: Tone and style instructions
+
 WORKFLOW:
 1. If user provides target audience, ask about their goal
 2. Once you have target + goal, CREATE immediately using the appropriate tool
@@ -240,6 +264,128 @@ Be direct and action-oriented. Don't ask unnecessary questions.`
                   }
                 },
                 required: ["name", "description", "goal", "target_criteria", "instructions", "schedule", "steps"]
+              }
+            }
+          },
+          {
+            type: "function",
+            function: {
+              name: "run_test",
+              description: "Run a test execution of a workflow with specified parameters. Use this when user wants to test a campaign.",
+              parameters: {
+                type: "object",
+                properties: {
+                  workflow_id: {
+                    type: "string",
+                    description: "ID of the workflow to test"
+                  },
+                  max_prospects: {
+                    type: "number",
+                    description: "Number of prospects to test with (default: 5)",
+                    default: 5
+                  },
+                  skip_sending: {
+                    type: "boolean",
+                    description: "Whether to skip actually sending emails (default: true for testing)",
+                    default: true
+                  },
+                  use_template: {
+                    type: "boolean",
+                    description: "Whether to use an email template",
+                    default: false
+                  },
+                  template_id: {
+                    type: "string",
+                    description: "ID of template to use (if use_template is true)"
+                  }
+                },
+                required: ["workflow_id"]
+              }
+            }
+          },
+          {
+            type: "function",
+            function: {
+              name: "add_email_template",
+              description: "Create a new email template with structured components for a workflow",
+              parameters: {
+                type: "object",
+                properties: {
+                  workflow_id: {
+                    type: "string",
+                    description: "ID of workflow this template is for"
+                  },
+                  name: {
+                    type: "string",
+                    description: "Template name"
+                  },
+                  subject: {
+                    type: "string",
+                    description: "Email subject line with variables like {name}, {company}, {title}"
+                  },
+                  body: {
+                    type: "string",
+                    description: "Email body with variables like {name}, {company}, {title}"
+                  },
+                  components: {
+                    type: "object",
+                    description: "Structured template components",
+                    properties: {
+                      background_research: {
+                        type: "string",
+                        description: "What background research to do on prospects"
+                      },
+                      opening_hook: {
+                        type: "string",
+                        description: "How to open the email"
+                      },
+                      value_proposition: {
+                        type: "string",
+                        description: "Main value proposition"
+                      },
+                      personalization_strategy: {
+                        type: "string",
+                        description: "How to personalize the email"
+                      },
+                      call_to_action: {
+                        type: "string",
+                        description: "What action to request"
+                      },
+                      tone_guidelines: {
+                        type: "string",
+                        description: "Tone and style guidelines"
+                      }
+                    }
+                  }
+                },
+                required: ["workflow_id", "name", "subject", "body", "components"]
+              }
+            }
+          },
+          {
+            type: "function",
+            function: {
+              name: "edit_email_template",
+              description: "Edit an existing email template",
+              parameters: {
+                type: "object",
+                properties: {
+                  template_id: {
+                    type: "string",
+                    description: "ID of template to edit"
+                  },
+                  updates: {
+                    type: "object",
+                    description: "Fields to update",
+                    properties: {
+                      name: { type: "string" },
+                      subject: { type: "string" },
+                      body: { type: "string" },
+                      components: { type: "object" }
+                    }
+                  }
+                },
+                required: ["template_id", "updates"]
               }
             }
           },
