@@ -1152,7 +1152,19 @@ serve(async (req) => {
         const senderName = 'Hari'; // Default sender name
         
         // SIMPLE LOGIC: Use template if it exists, otherwise generate
-        const templateBody = emailTemplate?.example_email?.body?.trim() || templateCheckBody?.trim() || null;
+        // Check multiple sources to ensure we find the template
+        const templateFromEmailTemplate = emailTemplate?.example_email?.body?.trim();
+        const templateFromCheckBody = templateCheckBody?.trim();
+        const templateBody = templateFromEmailTemplate || templateFromCheckBody || null;
+        
+        // DEBUG: Log what we found
+        console.log(`\n🔍 TEMPLATE CHECK FOR ${prospect.name}:`);
+        console.log(`   emailTemplate exists: ${!!emailTemplate}`);
+        console.log(`   emailTemplate.example_email exists: ${!!emailTemplate?.example_email}`);
+        console.log(`   emailTemplate.example_email.body exists: ${!!emailTemplate?.example_email?.body}`);
+        console.log(`   templateFromEmailTemplate: ${templateFromEmailTemplate ? `YES (${templateFromEmailTemplate.length} chars)` : 'NO'}`);
+        console.log(`   templateCheckBody: ${templateCheckBody ? `YES (${templateCheckBody.length} chars)` : 'NO'}`);
+        console.log(`   templateBody (final): ${templateBody ? `YES (${templateBody.length} chars)` : 'NO'}`);
         
         if (templateBody) {
           // Use template - simple and direct
@@ -1161,8 +1173,10 @@ serve(async (req) => {
             ? replacePlaceholders(emailTemplate.example_email.subject, prospect, senderName)
             : 'Quick question';
           
-          await updateExecutionLog(supabase, execution_id, `[3/3] 📧 Using template for ${prospect.name}...`);
+          console.log(`   ✅ USING TEMPLATE - parsedBody set to template (${parsedBody.length} chars)`);
+          await updateExecutionLog(supabase, execution_id, `[3/3] 📧 Using template for ${prospect.name} (${templateBody.length} chars)...`);
         } else {
+          console.log(`   ❌ NO TEMPLATE - will use AI generation`);
           // No template - generate with AI
           await updateExecutionLog(supabase, execution_id, `[3/3] 🤖 Gemini: Generating email ${i + 1}/${prospects.length} for ${prospect.name}...`);
           
@@ -1383,7 +1397,16 @@ Return ONLY a JSON object:
         }
         
         // Replace placeholders and clean up
+        // DEBUG: Log before placeholder replacement
+        const wasTemplate = templateBody !== null;
+        const bodyBeforePlaceholders = parsedBody;
         parsedBody = replacePlaceholders(parsedBody, prospect, senderName);
+        
+        // DEBUG: Log after placeholder replacement
+        if (wasTemplate) {
+          console.log(`   ✅ Template used: body length ${bodyBeforePlaceholders.length} → ${parsedBody.length} after placeholders`);
+          await updateExecutionLog(supabase, execution_id, `✅ Template applied for ${prospect.name}, placeholders replaced`);
+        }
         
         // COMPREHENSIVE duplicate signature removal - catch ALL variations
         // Strategy: Find the LAST occurrence of senderName, then remove any duplicates after that
