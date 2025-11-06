@@ -588,35 +588,45 @@ serve(async (req) => {
             const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
             
             if (!uuidRegex.test(prospect.id)) {
-              // Prospect ID is not a UUID (likely from Clado), save prospect to get UUID
-              console.log('Saving prospect to database:', prospect.name);
-              
-              const { data: savedProspect, error: prospectError } = await supabase
-                .from('prospects')
-                .insert({
-                  campaign_id: campaign_id,
-                  user_id: user.id,
-                  name: prospect.name,
-                  email: prospect.email || '',
-                  title: prospect.title || '',
-                  company: prospect.company || '',
-                  linkedin_url: prospect.linkedin_url || '',
-                  enrichment_data: {
-                    clado_id: prospect.id,
-                    found_at: new Date().toISOString()
-                  },
-                  status: 'pending'
-                })
-                .select()
-                .single();
+              // Prospect ID is not a UUID (likely from Clado)
+              if (campaign_id) {
+                // Save prospect only if we have a campaign context
+                console.log('Saving prospect to database:', prospect.name);
+                const { data: savedProspect, error: prospectError } = await supabase
+                  .from('prospects')
+                  .insert({
+                    campaign_id: campaign_id,
+                    user_id: user.id,
+                    name: prospect.name,
+                    email: prospect.email || '',
+                    title: prospect.title || '',
+                    company: prospect.company || '',
+                    linkedin_url: prospect.linkedin_url || '',
+                    enrichment_data: {
+                      clado_id: prospect.id,
+                      found_at: new Date().toISOString()
+                    },
+                    status: 'pending'
+                  })
+                  .select()
+                  .single();
 
-              if (prospectError) {
-                console.error('Failed to save prospect:', prospectError);
-                throw new Error(`Failed to save prospect: ${prospectError.message}`);
+                if (prospectError) {
+                  console.error('Failed to save prospect:', prospectError);
+                  throw new Error(`Failed to save prospect: ${prospectError.message}`);
+                }
+
+                prospectUuid = savedProspect.id;
+                console.log('Saved prospect with UUID:', prospectUuid);
+              } else {
+                // No campaign_id: run in preview mode without DB insert
+                prospectUuid = crypto.randomUUID();
+                await updateExecutionLog(
+                  supabase,
+                  execution_id,
+                  `ℹ️ Preview mode: using temp ID for prospect ${prospect.name}`
+                );
               }
-
-              prospectUuid = savedProspect.id;
-              console.log('Saved prospect with UUID:', prospectUuid);
             }
 
             // Save email to database first
@@ -643,89 +653,98 @@ serve(async (req) => {
             }
 
             try {
-              const { data: email, error: saveError } = await supabase
-                .from('emails')
-                .insert({
-                  prospect_id: prospectUuid,
-                  campaign_id: campaign_id,
-                  user_id: user.id,
-                  subject: subject,
-                  body: body,
-                  send_status: skipSending ? 'skipped' : 'pending',
-                })
-                .select()
-                .single();
+              if (campaign_id) {
+                const { data: email, error: saveError } = await supabase
+                  .from('emails')
+                  .insert({
+                    prospect_id: prospectUuid,
+                    campaign_id: campaign_id,
+                    user_id: user.id,
+                    subject: subject,
+                    body: body,
+                    send_status: skipSending ? 'skipped' : 'pending',
+                  })
+                  .select()
+                  .single();
 
-              if (saveError) {
-                console.error('Failed to save email:', saveError);
-                throw new Error(`Failed to save email: ${saveError.message}`);
-              }
+                if (saveError) {
+                  console.error('Failed to save email:', saveError);
+                  throw new Error(`Failed to save email: ${saveError.message}`);
+                }
 
-              savedEmail = email;
+                savedEmail = email;
 
-              // Send email via Composio if not skipped
-              if (!skipSending) {
+                // Send email via Composio if not skipped
+                if (!skipSending) {
+                  await updateExecutionLog(
+                    supabase,
+                    execution_id,
+                    `📤 Sending email to ${prospect.email}...`
+                  );
+
+                  await supabase
+                    .from('emails')
+                    .update({ 
+                      send_status: 'sending',
+                      send_attempted_at: new Date().toISOString()
+                    })
+                    .eq('id', email.id);
+
+                  const { data: sendResult, error: sendError } = await supabase.functions.invoke('send-email', {
+                    body: { email_id: email.id }
+                  });
+
+                  if (sendError) {
+                    console.error('Send email error:', sendError);
+                    sendStatus = 'failed';
+                    emailSendError = sendError.message;
+                    
+                    await supabase
+                      .from('emails')
+                      .update({ 
+                        send_status: 'failed',
+                        send_error: sendError.message
+                      })
+                      .eq('id', email.id);
+
+                    await updateExecutionLog(
+                      supabase,
+                      execution_id,
+                      `❌ Failed to send to ${prospect.email}: ${sendError.message}`
+                    );
+                  } else if (sendResult?.error) {
+                    sendStatus = 'failed';
+                    emailSendError = sendResult.error;
+                    
+                    await supabase
+                      .from('emails')
+                      .update({ 
+                        send_status: 'failed',
+                        send_error: sendResult.error
+                      })
+                      .eq('id', email.id);
+
+                    await updateExecutionLog(
+                      supabase,
+                      execution_id,
+                      `❌ Failed to send to ${prospect.email}: ${sendResult.error}`
+                    );
+                  } else {
+                    sendStatus = 'sent';
+                    await updateExecutionLog(
+                      supabase,
+                      execution_id,
+                      `✅ Email sent to ${prospect.email}`
+                    );
+                  }
+                }
+              } else {
+                // No campaign_id: preview mode, skip DB email write
                 await updateExecutionLog(
                   supabase,
                   execution_id,
-                  `📤 Sending email to ${prospect.email}...`
+                  `ℹ️ Preview mode: not saving email to DB for ${prospect.name}`
                 );
-
-                await supabase
-                  .from('emails')
-                  .update({ 
-                    send_status: 'sending',
-                    send_attempted_at: new Date().toISOString()
-                  })
-                  .eq('id', email.id);
-
-                const { data: sendResult, error: sendError } = await supabase.functions.invoke('send-email', {
-                  body: { email_id: email.id }
-                });
-
-                if (sendError) {
-                  console.error('Send email error:', sendError);
-                  sendStatus = 'failed';
-                  emailSendError = sendError.message;
-                  
-                  await supabase
-                    .from('emails')
-                    .update({ 
-                      send_status: 'failed',
-                      send_error: sendError.message
-                    })
-                    .eq('id', email.id);
-
-                  await updateExecutionLog(
-                    supabase,
-                    execution_id,
-                    `❌ Failed to send to ${prospect.email}: ${sendError.message}`
-                  );
-                } else if (sendResult?.error) {
-                  sendStatus = 'failed';
-                  emailSendError = sendResult.error;
-                  
-                  await supabase
-                    .from('emails')
-                    .update({ 
-                      send_status: 'failed',
-                      send_error: sendResult.error
-                    })
-                    .eq('id', email.id);
-
-                  await updateExecutionLog(
-                    supabase,
-                    execution_id,
-                    `❌ Failed to send to ${prospect.email}: ${sendResult.error}`
-                  );
-                } else {
-                  sendStatus = 'sent';
-                  await updateExecutionLog(
-                    supabase,
-                    execution_id,
-                    `✅ Email sent to ${prospect.email}`
-                  );
-                }
               }
             } catch (saveErr: any) {
               console.error('Error saving/sending email:', saveErr);
