@@ -262,10 +262,11 @@ serve(async (req) => {
 
   } catch (error: any) {
     console.error('Error in execute-workflow:', error);
+    // Don't fail the HTTP call; surface error in body and let UI read logs realtime
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: error.message, ok: false }),
       { 
-        status: 500,
+        status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       }
     );
