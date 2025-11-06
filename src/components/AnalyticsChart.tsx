@@ -10,9 +10,12 @@ const data = [
 
 export const AnalyticsChart = () => {
   return (
-    <Card className="bg-card border-border p-6">
+    <Card className="bg-card border-border p-6 hover:shadow-lg hover:shadow-primary/5 transition-all duration-300">
       <div className="flex items-center justify-between mb-6">
-        <h3 className="text-lg font-semibold text-foreground">Analytics</h3>
+        <div>
+          <h3 className="text-base font-semibold text-foreground mb-1">Analytics</h3>
+          <p className="text-xs text-muted-foreground/60">Peak day: Aug 21</p>
+        </div>
         <button className="p-1 hover:bg-muted rounded transition-colors">
           <MoreVertical className="w-5 h-5 text-muted-foreground" />
         </button>

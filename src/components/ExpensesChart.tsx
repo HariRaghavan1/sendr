@@ -24,11 +24,14 @@ const COLORS = ["hsl(var(--secondary))", "hsl(var(--primary))", "hsl(var(--chart
 
 export const ExpensesChart = () => {
   return (
-    <Card className="bg-card border-border p-6">
+    <Card className="bg-card border-border p-6 hover:shadow-lg hover:shadow-primary/5 transition-all duration-300">
       <div className="flex items-center justify-between mb-6">
-        <h3 className="text-lg font-semibold text-foreground">My Expenses</h3>
+        <div>
+          <h3 className="text-base font-semibold text-foreground mb-1">My Expenses</h3>
+          <p className="text-xs text-muted-foreground/60">Last updated 2 hours ago</p>
+        </div>
         <Select defaultValue="week">
-          <SelectTrigger className="w-28 bg-background border-border">
+          <SelectTrigger className="w-28 bg-background/50 border-border hover:bg-background transition-colors">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

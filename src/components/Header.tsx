@@ -4,8 +4,8 @@ import { Input } from "@/components/ui/input";
 
 export const Header = () => {
   return (
-    <header className="border-b border-border bg-card">
-      <div className="flex items-center justify-between px-8 py-4">
+    <header className="border-b border-border/50 bg-card backdrop-blur-sm sticky top-0 z-50">
+      <div className="flex items-center justify-between px-8 py-3.5">
         <div className="flex items-center gap-12">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-gradient-to-r from-primary to-secondary flex items-center justify-center">
@@ -14,9 +14,9 @@ export const Header = () => {
           </div>
           
           <nav className="flex items-center gap-8">
-            <a href="#" className="text-primary font-medium">Home</a>
-            <a href="#" className="text-muted-foreground hover:text-foreground transition-colors">Settings</a>
-            <a href="#" className="text-muted-foreground hover:text-foreground transition-colors">Help</a>
+            <a href="#" className="text-primary font-medium text-sm relative after:absolute after:bottom-0 after:left-0 after:w-full after:h-0.5 after:bg-primary">Home</a>
+            <a href="#" className="text-muted-foreground hover:text-foreground transition-all text-sm">Settings</a>
+            <a href="#" className="text-muted-foreground hover:text-foreground transition-all text-sm">Help</a>
           </nav>
         </div>
 

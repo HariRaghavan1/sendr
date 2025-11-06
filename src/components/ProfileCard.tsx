@@ -14,12 +14,12 @@ const earningsData = [
 
 export const ProfileCard = () => {
   return (
-    <Card className="bg-card border-border p-6 space-y-6">
+    <Card className="bg-card border-border p-6 space-y-6 sticky top-8">
       <div className="space-y-4">
-        <h2 className="text-2xl font-bold text-foreground">James Martinia Junior</h2>
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">Verified Account</span>
-          <CheckCircle2 className="w-4 h-4 text-primary" />
+        <h2 className="text-xl font-bold text-foreground leading-tight">James Martinia Junior</h2>
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-muted-foreground/70">Verified Account</span>
+          <CheckCircle2 className="w-4 h-4 text-primary animate-pulse" />
         </div>
 
         <div className="grid grid-cols-3 gap-4 pt-2">
@@ -38,39 +38,42 @@ export const ProfileCard = () => {
         </div>
       </div>
 
-      <Card className="bg-background border-border p-4">
+      <Card className="bg-gradient-to-br from-background to-background/50 border-border p-5 hover:shadow-md transition-all duration-300">
         <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-6 rounded bg-gradient-to-r from-secondary to-primary"></div>
-            <div className="w-8 h-6 rounded-full bg-primary"></div>
+          <div className="flex items-center gap-2.5">
+            <div className="w-10 h-7 rounded-md bg-gradient-to-r from-secondary to-primary shadow-sm"></div>
+            <div className="w-10 h-7 rounded-full bg-primary/90 shadow-sm"></div>
           </div>
-          <button className="p-1 hover:bg-muted rounded transition-colors">
-            <MoreHorizontal className="w-5 h-5 text-muted-foreground" />
+          <button className="p-1.5 hover:bg-muted/60 rounded-md transition-colors">
+            <MoreHorizontal className="w-4 h-4 text-muted-foreground" />
           </button>
         </div>
 
-        <div className="space-y-1 mb-4">
-          <p className="text-2xl font-bold text-foreground">$ 6421.50</p>
-          <p className="text-sm text-muted-foreground">Balance</p>
+        <div className="space-y-1.5 mb-5">
+          <p className="text-2xl font-bold text-foreground tabular-nums tracking-tight">$ 6,421.50</p>
+          <p className="text-xs text-muted-foreground/70">Balance • Updated 1m ago</p>
         </div>
 
-        <div className="flex gap-1 text-muted-foreground font-mono text-sm">
+        <div className="flex gap-2 text-muted-foreground/60 font-mono text-sm tracking-wider">
           <span>••••</span>
           <span>••••</span>
           <span>••••</span>
-          <span className="text-foreground">3667</span>
+          <span className="text-foreground/90 font-semibold">3667</span>
         </div>
       </Card>
 
-      <Card className="bg-background border-border p-4">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-sm text-muted-foreground">Earnings</span>
-          <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
-            <span className="text-xs font-bold text-primary-foreground">P</span>
+      <Card className="bg-gradient-to-br from-background to-background/50 border-border p-5 hover:shadow-md transition-all duration-300">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <span className="text-xs text-muted-foreground/70 uppercase tracking-wide">Earnings</span>
+            <p className="text-xs text-muted-foreground/50 mt-0.5">This week</p>
+          </div>
+          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-primary to-primary/80 flex items-center justify-center shadow-sm">
+            <span className="text-sm font-bold text-primary-foreground">P</span>
           </div>
         </div>
 
-        <p className="text-2xl font-bold text-foreground mb-4">$894.39</p>
+        <p className="text-2xl font-bold text-foreground tabular-nums tracking-tight mb-4">$894.39</p>
 
         <div className="h-24 mb-2">
           <ResponsiveContainer width="100%" height="100%">

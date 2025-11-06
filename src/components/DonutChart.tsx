@@ -11,10 +11,10 @@ const COLORS = ["hsl(var(--secondary))", "hsl(var(--primary))"];
 
 export const DonutChart = () => {
   return (
-    <Card className="bg-card border-border p-6">
-      <div className="mb-4">
-        <h3 className="text-lg font-semibold text-foreground mb-1">Designers Group UK</h3>
-        <p className="text-sm text-muted-foreground">Weekly Pay</p>
+    <Card className="bg-card border-border p-6 hover:shadow-lg hover:shadow-primary/5 transition-all duration-300">
+      <div className="mb-6">
+        <h3 className="text-base font-semibold text-foreground mb-1.5">Designers Group UK</h3>
+        <p className="text-sm text-muted-foreground/70">Weekly Pay • 5 days left</p>
       </div>
 
       <div className="flex items-center justify-between">

@@ -13,8 +13,13 @@ const data = [
 
 export const AccountOverview = () => {
   return (
-    <Card className="bg-card border-border p-6">
-      <h3 className="text-lg font-semibold text-foreground mb-6">Account Overview</h3>
+    <Card className="bg-card border-border p-6 hover:shadow-lg hover:shadow-primary/5 transition-all duration-300">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h3 className="text-base font-semibold text-foreground mb-1">Account Overview</h3>
+          <p className="text-xs text-muted-foreground/60">Jan 12 - Jan 18, 2024</p>
+        </div>
+      </div>
 
       <div className="h-64">
         <ResponsiveContainer width="100%" height="100%">
