@@ -5,13 +5,14 @@ export interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
   metadata?: {
-    type?: 'workflow' | 'campaign' | 'execution' | 'template';
+    type?: 'workflow' | 'campaign' | 'execution' | 'template' | 'gmail_connect';
     workflowId?: string;
     workflowData?: any;
     campaignId?: string;
     executionId?: string;
     templateId?: string;
     templateData?: any;
+    reason?: string;
   };
 }
 
