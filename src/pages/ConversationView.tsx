@@ -341,7 +341,7 @@ try {
       description: `"${workflowData.name}" is ready. Click "Test Run" to test it.`,
     });
 
-    finalAssistantContent = `Created campaign "${workflowData.name}". Click "Test Run" below to test it with a small batch.`;
+    finalAssistantContent = `Created campaign "${workflowData.name}" (ID: ${workflow?.id}). Click "Test Run" below to test it with a small batch.`;
   }
 } catch (e) {
   console.error('Auto-create campaign error:', e);
