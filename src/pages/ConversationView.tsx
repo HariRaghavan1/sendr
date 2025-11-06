@@ -863,6 +863,8 @@ try {
                           body: {
                             workflow_id: workflowId,
                             execution_id: execution.id,
+                            max_prospects: 5,
+                            skip_sending: true,
                           },
                         }).then(({ error }) => {
                           if (error) {
