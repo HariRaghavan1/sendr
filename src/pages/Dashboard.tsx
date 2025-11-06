@@ -3,173 +3,239 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Plus, Play, Pause, Settings as SettingsIcon, LogOut, Dog, Sparkles } from "lucide-react";
+import { Plus, Sparkles, TrendingUp, Users, Mail, Target } from "lucide-react";
+import { EmptyState } from "@/components/EmptyState";
 import { toast } from "sonner";
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const [campaigns, setCampaigns] = useState<any[]>([]);
+  const [stats, setStats] = useState({
+    totalCampaigns: 0,
+    activeCampaigns: 0,
+    totalSent: 0,
+    totalReplied: 0,
+  });
   const [loading, setLoading] = useState(true);
-  const [user, setUser] = useState<any>(null);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      setUser(user);
-    });
-
-    loadCampaigns();
+    loadDashboard();
   }, []);
 
-  const loadCampaigns = async () => {
+  const loadDashboard = async () => {
     const { data, error } = await supabase
       .from("campaigns")
       .select("*")
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .limit(5);
 
     if (error) {
-      toast.error("Failed to load campaigns");
+      toast.error("Failed to load dashboard");
     } else {
-      setCampaigns(data || []);
+      const campaigns = data || [];
+      setCampaigns(campaigns);
+      
+      setStats({
+        totalCampaigns: campaigns.length,
+        activeCampaigns: campaigns.filter((c) => c.status === "active").length,
+        totalSent: campaigns.reduce((sum, c) => sum + (c.total_sent || 0), 0),
+        totalReplied: campaigns.reduce((sum, c) => sum + (c.total_replied || 0), 0),
+      });
     }
     setLoading(false);
   };
 
-  const handleSignOut = async () => {
-    await supabase.auth.signOut();
-    navigate("/auth");
-  };
-
-  const toggleCampaignStatus = async (campaignId: string, currentStatus: string) => {
-    const newStatus = currentStatus === "active" ? "paused" : "active";
-    const { error } = await supabase
-      .from("campaigns")
-      .update({ status: newStatus })
-      .eq("id", campaignId);
-
-    if (error) {
-      toast.error("Failed to update campaign");
-    } else {
-      toast.success(`Campaign ${newStatus === "active" ? "activated" : "paused"}`);
-      loadCampaigns();
-    }
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "active": return "bg-green-500";
-      case "paused": return "bg-yellow-500";
-      case "completed": return "bg-blue-500";
-      default: return "bg-gray-500";
-    }
-  };
+  if (loading) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b bg-card">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Dog className="h-8 w-8 text-primary" />
-            <h1 className="text-2xl font-bold">Bork</h1>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="icon" onClick={() => navigate("/settings")}>
-              <SettingsIcon className="h-5 w-5" />
-            </Button>
-            <Button variant="ghost" size="icon" onClick={handleSignOut}>
-              <LogOut className="h-5 w-5" />
-            </Button>
-          </div>
-        </div>
-      </header>
-
-      <main className="container mx-auto px-4 py-8">
-        <div className="flex items-center justify-between mb-6">
+    <div className="flex-1 p-8 overflow-auto">
+      <div className="max-w-7xl mx-auto space-y-8">
+        <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-3xl font-bold">Your Campaigns</h2>
-            <p className="text-muted-foreground">Manage your outbound campaigns</p>
+            <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+            <p className="text-muted-foreground mt-1">
+              Overview of your outreach campaigns
+            </p>
           </div>
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => navigate("/campaigns/ai-create")}>
-              <Sparkles className="mr-2 h-4 w-4" />
-              AI Create
-            </Button>
-            <Button onClick={() => navigate("/campaigns/new")}>
-              <Plus className="mr-2 h-4 w-4" />
-              New Campaign
-            </Button>
-          </div>
+          <Button onClick={() => navigate("/campaigns/ai-create")} size="lg">
+            <Sparkles className="mr-2 h-4 w-4" />
+            Create Campaign
+          </Button>
         </div>
 
-        {loading ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-          </div>
-        ) : campaigns.length === 0 ? (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <Card>
-            <CardContent className="flex flex-col items-center justify-center py-12">
-              <Dog className="h-16 w-16 text-muted-foreground mb-4" />
-              <h3 className="text-xl font-semibold mb-2">No campaigns yet</h3>
-              <p className="text-muted-foreground mb-4">Create your first campaign to start finding leads</p>
-              <Button onClick={() => navigate("/campaigns/new")}>
-                <Plus className="mr-2 h-4 w-4" />
-                Create Campaign
-              </Button>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Total Campaigns</CardTitle>
+              <Target className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.totalCampaigns}</div>
+              <p className="text-xs text-muted-foreground mt-1">
+                {stats.activeCampaigns} active
+              </p>
             </CardContent>
           </Card>
-        ) : (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {campaigns.map((campaign) => (
-              <Card key={campaign.id} className="hover:shadow-lg transition-shadow cursor-pointer"
-                onClick={() => navigate(`/campaigns/${campaign.id}`)}>
-                <CardHeader>
-                  <div className="flex items-start justify-between">
-                    <CardTitle>{campaign.name}</CardTitle>
-                    <Badge className={getStatusColor(campaign.status)}>
-                      {campaign.status}
-                    </Badge>
-                  </div>
-                  <CardDescription>
-                    {campaign.tone} tone • {campaign.goal} goal
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-2 gap-4 mb-4">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Sent</p>
-                      <p className="text-2xl font-bold">{campaign.total_sent}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">Replied</p>
-                      <p className="text-2xl font-bold">{campaign.total_replied}</p>
-                    </div>
-                  </div>
-                  <Button
-                    className="w-full"
-                    variant={campaign.status === "active" ? "secondary" : "default"}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggleCampaignStatus(campaign.id, campaign.status);
-                    }}
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Active Campaigns</CardTitle>
+              <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.activeCampaigns}</div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Currently running
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Emails Sent</CardTitle>
+              <Mail className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.totalSent}</div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Total outreach
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Replies</CardTitle>
+              <Users className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.totalReplied}</div>
+              <p className="text-xs text-muted-foreground mt-1">
+                {stats.totalSent > 0
+                  ? `${((stats.totalReplied / stats.totalSent) * 100).toFixed(1)}% rate`
+                  : "No data yet"}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Recent Campaigns</CardTitle>
+                <CardDescription>Your latest outreach workflows</CardDescription>
+              </div>
+              <Button variant="outline" onClick={() => navigate("/workflows")}>
+                View All
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {campaigns.length === 0 ? (
+              <EmptyState
+                icon={Sparkles}
+                title="No campaigns yet"
+                description="Create your first campaign to start reaching out to prospects with AI-powered personalization"
+                actionLabel="Create Campaign"
+                onAction={() => navigate("/campaigns/ai-create")}
+              />
+            ) : (
+              <div className="space-y-3">
+                {campaigns.map((campaign) => (
+                  <div
+                    key={campaign.id}
+                    onClick={() => navigate(`/campaigns/${campaign.id}`)}
+                    className="flex items-center justify-between p-4 rounded-lg border hover:border-primary/50 cursor-pointer transition-colors group"
                   >
-                    {campaign.status === "active" ? (
-                      <>
-                        <Pause className="mr-2 h-4 w-4" />
-                        Pause
-                      </>
-                    ) : (
-                      <>
-                        <Play className="mr-2 h-4 w-4" />
-                        Activate
-                      </>
-                    )}
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
-      </main>
+                    <div className="flex items-center gap-4 flex-1">
+                      <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+                        <Target className="h-5 w-5 text-primary" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h4 className="font-medium truncate group-hover:text-primary transition-colors">
+                          {campaign.name}
+                        </h4>
+                        <p className="text-sm text-muted-foreground">
+                          {campaign.tone} • {campaign.goal}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-6 text-sm">
+                      <div className="text-center">
+                        <p className="font-bold">{campaign.total_sent || 0}</p>
+                        <p className="text-muted-foreground text-xs">Sent</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="font-bold">{campaign.total_replied || 0}</p>
+                        <p className="text-muted-foreground text-xs">Replied</p>
+                      </div>
+                      <div className={`px-3 py-1 rounded-full text-xs font-medium ${
+                        campaign.status === "active"
+                          ? "bg-green-500/10 text-green-500"
+                          : campaign.status === "paused"
+                          ? "bg-yellow-500/10 text-yellow-500"
+                          : "bg-gray-500/10 text-gray-500"
+                      }`}>
+                        {campaign.status}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Quick Actions</CardTitle>
+            <CardDescription>Get started with common tasks</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4 md:grid-cols-2">
+            <Button
+              variant="outline"
+              className="h-auto py-6 justify-start"
+              onClick={() => navigate("/campaigns/ai-create")}
+            >
+              <div className="flex items-start gap-4">
+                <div className="rounded-lg bg-primary/10 p-3">
+                  <Sparkles className="h-6 w-6 text-primary" />
+                </div>
+                <div className="text-left">
+                  <div className="font-semibold">AI Campaign Builder</div>
+                  <div className="text-sm text-muted-foreground">
+                    Chat with AI to create campaigns
+                  </div>
+                </div>
+              </div>
+            </Button>
+            <Button
+              variant="outline"
+              className="h-auto py-6 justify-start"
+              onClick={() => navigate("/campaigns/new")}
+            >
+              <div className="flex items-start gap-4">
+                <div className="rounded-lg bg-primary/10 p-3">
+                  <Plus className="h-6 w-6 text-primary" />
+                </div>
+                <div className="text-left">
+                  <div className="font-semibold">Manual Campaign</div>
+                  <div className="text-sm text-muted-foreground">
+                    Create campaign with a form
+                  </div>
+                </div>
+              </div>
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

@@ -4,8 +4,16 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Play, Pause, Trash2 } from "lucide-react";
+import { Play, Pause, Trash2, Mail, Eye, MessageSquare, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 export default function CampaignDetail() {
   const { id } = useParams();
@@ -82,7 +90,7 @@ export default function CampaignDetail() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="flex-1 flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
       </div>
     );
@@ -95,22 +103,21 @@ export default function CampaignDetail() {
     : "0.0";
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b bg-card">
-        <div className="container mx-auto px-4 py-4">
-          <Button variant="ghost" onClick={() => navigate("/dashboard")}>
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Dashboard
-          </Button>
-        </div>
-      </header>
-
-      <main className="container mx-auto px-4 py-8">
-        <div className="flex items-center justify-between mb-6">
+    <div className="flex-1 p-8 overflow-auto">
+      <div className="max-w-7xl mx-auto space-y-6">
+        <div className="flex items-start justify-between">
           <div>
             <div className="flex items-center gap-3 mb-2">
-              <h1 className="text-3xl font-bold">{campaign.name}</h1>
-              <Badge>{campaign.status}</Badge>
+              <h1 className="text-3xl font-bold tracking-tight">{campaign.name}</h1>
+              <Badge variant="outline" className={
+                campaign.status === "active"
+                  ? "bg-green-500/10 text-green-500 border-green-500/20"
+                  : campaign.status === "paused"
+                  ? "bg-yellow-500/10 text-yellow-500 border-yellow-500/20"
+                  : "bg-gray-500/10 text-gray-500 border-gray-500/20"
+              }>
+                {campaign.status}
+              </Badge>
             </div>
             <p className="text-muted-foreground">
               {campaign.tone} tone • {campaign.goal} goal
@@ -137,116 +144,129 @@ export default function CampaignDetail() {
           </div>
         </div>
 
-        <div className="grid gap-6 md:grid-cols-4 mb-8">
+        <div className="grid gap-4 md:grid-cols-4">
           <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Sent</CardTitle>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Emails Sent</CardTitle>
+              <Mail className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">{campaign.total_sent}</div>
+              <div className="text-2xl font-bold">{campaign.total_sent || 0}</div>
             </CardContent>
           </Card>
 
           <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Opened</CardTitle>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Opened</CardTitle>
+              <Eye className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">{campaign.total_opened}</div>
+              <div className="text-2xl font-bold">{campaign.total_opened || 0}</div>
             </CardContent>
           </Card>
 
           <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Replied</CardTitle>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Replied</CardTitle>
+              <MessageSquare className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">{campaign.total_replied}</div>
+              <div className="text-2xl font-bold">{campaign.total_replied || 0}</div>
             </CardContent>
           </Card>
 
           <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Reply Rate</CardTitle>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Reply Rate</CardTitle>
+              <TrendingUp className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">{replyRate}%</div>
+              <div className="text-2xl font-bold">{replyRate}%</div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="grid gap-6 md:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle>Target Criteria</CardTitle>
+              <CardDescription>Who you're reaching out to</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <p className="text-sm text-muted-foreground">Industry</p>
+                <p className="font-medium">{campaign.target_criteria.industry || "Not specified"}</p>
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Location</p>
+                <p className="font-medium">{campaign.target_criteria.location || "Not specified"}</p>
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Job Titles</p>
+                <p className="font-medium">{campaign.target_criteria.job_titles || "Not specified"}</p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Schedule Configuration</CardTitle>
+              <CardDescription>When emails are sent</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <p className="text-sm text-muted-foreground">Frequency</p>
+                <p className="font-medium capitalize">{campaign.frequency_config.type}</p>
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Send Time</p>
+                <p className="font-medium">{campaign.frequency_config.time}</p>
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Batch Size</p>
+                <p className="font-medium">{campaign.frequency_config.batch_size} emails per batch</p>
+              </div>
             </CardContent>
           </Card>
         </div>
 
         <Card>
           <CardHeader>
-            <CardTitle>Campaign Configuration</CardTitle>
-            <CardDescription>Settings and target criteria</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <h3 className="font-semibold mb-2">Target Criteria</h3>
-              <dl className="grid grid-cols-2 gap-4">
-                <div>
-                  <dt className="text-sm text-muted-foreground">Industry</dt>
-                  <dd className="font-medium">{campaign.target_criteria.industry || "Not specified"}</dd>
-                </div>
-                <div>
-                  <dt className="text-sm text-muted-foreground">Location</dt>
-                  <dd className="font-medium">{campaign.target_criteria.location || "Not specified"}</dd>
-                </div>
-                <div>
-                  <dt className="text-sm text-muted-foreground">Job Titles</dt>
-                  <dd className="font-medium">{campaign.target_criteria.job_titles || "Not specified"}</dd>
-                </div>
-              </dl>
-            </div>
-
-            <div>
-              <h3 className="font-semibold mb-2">Schedule</h3>
-              <dl className="grid grid-cols-2 gap-4">
-                <div>
-                  <dt className="text-sm text-muted-foreground">Frequency</dt>
-                  <dd className="font-medium capitalize">{campaign.frequency_config.type}</dd>
-                </div>
-                <div>
-                  <dt className="text-sm text-muted-foreground">Time</dt>
-                  <dd className="font-medium">{campaign.frequency_config.time}</dd>
-                </div>
-                <div>
-                  <dt className="text-sm text-muted-foreground">Batch Size</dt>
-                  <dd className="font-medium">{campaign.frequency_config.batch_size} emails</dd>
-                </div>
-              </dl>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="mt-6">
-          <CardHeader>
             <CardTitle>Prospects ({prospects.length})</CardTitle>
             <CardDescription>Leads being contacted in this campaign</CardDescription>
           </CardHeader>
           <CardContent>
             {prospects.length === 0 ? (
-              <p className="text-center text-muted-foreground py-8">
+              <div className="text-center py-12 text-muted-foreground">
                 No prospects yet. They will appear here when the campaign runs.
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {prospects.map((prospect) => (
-                  <div key={prospect.id} className="flex items-center justify-between p-3 border rounded-lg">
-                    <div>
-                      <p className="font-medium">{prospect.name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {prospect.title} at {prospect.company}
-                      </p>
-                    </div>
-                    <Badge variant="outline">{prospect.status}</Badge>
-                  </div>
-                ))}
               </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Title</TableHead>
+                    <TableHead>Company</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {prospects.map((prospect) => (
+                    <TableRow key={prospect.id}>
+                      <TableCell className="font-medium">{prospect.name}</TableCell>
+                      <TableCell>{prospect.title}</TableCell>
+                      <TableCell>{prospect.company}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline">{prospect.status}</Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             )}
           </CardContent>
         </Card>
-      </main>
+      </div>
     </div>
   );
 }

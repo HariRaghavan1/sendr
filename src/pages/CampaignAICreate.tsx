@@ -3,9 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Card } from "@/components/ui/card";
-import { useToast } from "@/components/ui/use-toast";
-import { ArrowLeft, Send, Sparkles, Loader2 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { Send, Sparkles, Loader2 } from "lucide-react";
 
 interface Message {
   role: 'user' | 'assistant';
@@ -18,7 +17,7 @@ const CampaignAICreate = () => {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'assistant',
-      content: "Hi! I'm here to help you create an email outreach campaign. What kind of campaign would you like to create?"
+      content: "Hi! I'll help you create an email outreach campaign. What kind of prospects do you want to reach?"
     }
   ]);
   const [input, setInput] = useState('');
@@ -65,7 +64,6 @@ const CampaignAICreate = () => {
         setMessages(prev => [...prev, { role: 'assistant', content: assistantText }]);
       }
 
-      // Handle tool calls (campaign creation)
       if (toolCalls.length > 0) {
         const toolCall = toolCalls.find(tc => tc.function?.name === 'create_campaign');
         if (toolCall?.function?.arguments) {
@@ -92,7 +90,7 @@ const CampaignAICreate = () => {
 
             setMessages(prev => [...prev, {
               role: 'assistant',
-              content: `Perfect! I've created your campaign "${config.name}". Redirecting you to view it...`
+              content: `Perfect! I've created your campaign "${config.name}". Redirecting you now...`
             }]);
 
             toast({
@@ -116,7 +114,7 @@ const CampaignAICreate = () => {
       console.error('Error in chat:', error);
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: 'Sorry, I encountered an error. Please try again or check that your OpenAI API key is configured in Settings.'
+        content: 'Sorry, I encountered an error. Please try again.'
       }]);
       toast({
         title: "Error",
@@ -129,68 +127,73 @@ const CampaignAICreate = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background p-8">
-      <div className="max-w-4xl mx-auto">
-        <div className="flex items-center gap-4 mb-8">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => navigate('/dashboard')}
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
-          <div className="flex items-center gap-2">
-            <Sparkles className="h-6 w-6 text-primary" />
-            <h1 className="text-3xl font-bold">AI Campaign Creator</h1>
+    <div className="flex-1 flex flex-col h-[calc(100vh-3.5rem)]">
+      <div className="flex-1 overflow-y-auto p-6">
+        <div className="max-w-3xl mx-auto space-y-6">
+          <div className="flex items-center gap-3 mb-8">
+            <div className="rounded-lg bg-primary/10 p-3">
+              <Sparkles className="h-6 w-6 text-primary" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold">AI Campaign Creator</h1>
+              <p className="text-sm text-muted-foreground">Create campaigns through conversation</p>
+            </div>
           </div>
-        </div>
 
-        <Card className="p-6 mb-4 min-h-[500px] max-h-[600px] overflow-y-auto">
-          <div className="space-y-4">
+          <div className="space-y-6">
             {messages.map((message, index) => (
               <div
                 key={index}
                 className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 <div
-                  className={`max-w-[80%] rounded-lg p-4 ${
+                  className={`max-w-[85%] rounded-2xl px-4 py-3 ${
                     message.role === 'user'
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-muted'
+                      ? 'bg-primary text-primary-foreground ml-12'
+                      : 'bg-card border mr-12'
                   }`}
                 >
-                  <p className="whitespace-pre-wrap">{message.content}</p>
+                  <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p>
                 </div>
               </div>
             ))}
             {loading && (
               <div className="flex justify-start">
-                <div className="bg-muted rounded-lg p-4">
-                  <Loader2 className="h-5 w-5 animate-spin" />
+                <div className="bg-card border rounded-2xl px-4 py-3">
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                 </div>
               </div>
             )}
             <div ref={messagesEndRef} />
           </div>
-        </Card>
+        </div>
+      </div>
 
-        <form onSubmit={handleSubmit} className="flex gap-2">
-          <Textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Tell me about your campaign..."
-            className="min-h-[60px]"
-            disabled={loading}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleSubmit(e);
-              }
-            }}
-          />
-          <Button type="submit" size="icon" disabled={loading || !input.trim()}>
-            <Send className="h-5 w-5" />
-          </Button>
+      <div className="border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <form onSubmit={handleSubmit} className="max-w-3xl mx-auto p-4">
+          <div className="flex gap-3">
+            <Textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Describe your campaign..."
+              className="min-h-[60px] max-h-[200px] resize-none"
+              disabled={loading}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSubmit(e);
+                }
+              }}
+            />
+            <Button 
+              type="submit" 
+              size="icon" 
+              disabled={loading || !input.trim()}
+              className="h-[60px] w-[60px] shrink-0"
+            >
+              <Send className="h-5 w-5" />
+            </Button>
+          </div>
         </form>
       </div>
     </div>
