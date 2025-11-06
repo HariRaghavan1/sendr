@@ -27,7 +27,7 @@ serve(async (req) => {
       throw new Error('Unauthorized');
     }
 
-    const { campaign_id, execution_type, max_prospects = 10, skip_sending = true } = await req.json();
+    const { campaign_id, execution_type, max_prospects = 10, skip_sending = true, email_template = null } = await req.json();
 
     console.log('Starting campaign execution:', { campaign_id, execution_type, max_prospects, skip_sending });
 
@@ -119,20 +119,39 @@ serve(async (req) => {
         );
 
         // Generate email
-        await updateExecutionLog(supabase, execution.id, `Generating email for ${prospect.name}...`);
+        let subject, body;
         
-        const { data: emailData, error: emailError } = await supabase.functions.invoke('generate-email', {
-          body: {
-            prospect,
-            campaign,
-          },
-        });
+        if (email_template) {
+          // Use template with basic personalization
+          await updateExecutionLog(supabase, execution.id, `Using template for ${prospect.name}...`);
+          
+          subject = email_template.subject
+            .replace(/\{name\}/gi, prospect.name || '')
+            .replace(/\{company\}/gi, prospect.company || '')
+            .replace(/\{title\}/gi, prospect.title || '');
+          
+          body = email_template.body
+            .replace(/\{name\}/gi, prospect.name || '')
+            .replace(/\{company\}/gi, prospect.company || '')
+            .replace(/\{title\}/gi, prospect.title || '');
+        } else {
+          // Generate custom email using AI
+          await updateExecutionLog(supabase, execution.id, `Generating email for ${prospect.name}...`);
+          
+          const { data: emailData, error: emailError } = await supabase.functions.invoke('generate-email', {
+            body: {
+              prospect,
+              campaign,
+            },
+          });
 
-        if (emailError) {
-          throw new Error(`Email generation failed: ${emailError.message}`);
+          if (emailError) {
+            throw new Error(`Email generation failed: ${emailError.message}`);
+          }
+
+          subject = emailData.subject;
+          body = emailData.body;
         }
-
-        const { subject, body } = emailData;
 
         // Save email to database
         const { error: saveError } = await supabase

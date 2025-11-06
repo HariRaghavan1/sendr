@@ -27,10 +27,18 @@ interface ExecutionMonitorProps {
 export const ExecutionMonitor = ({ executionId }: ExecutionMonitorProps) => {
   const { execution, loading } = useRealtimeExecution(executionId);
 
-  if (loading || !execution) {
+  if (loading) {
     return (
       <div className="flex items-center justify-center p-8">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!execution) {
+    return (
+      <div className="flex items-center justify-center p-8">
+        <p className="text-muted-foreground">No execution data available</p>
       </div>
     );
   }

@@ -17,12 +17,25 @@ interface TestRunDialogProps {
 
 export const TestRunDialog = ({ open, onOpenChange, campaignId }: TestRunDialogProps) => {
   const [maxProspects, setMaxProspects] = useState(5);
-  const [skipSending, setSkipSending] = useState(true);
+  const [skipSending, setSkipSending] = useState(false);
+  const [useTemplate, setUseTemplate] = useState(true);
+  const [emailSubject, setEmailSubject] = useState('');
+  const [emailBody, setEmailBody] = useState('');
   const [executionId, setExecutionId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
 
   const handleStartTest = async () => {
+    // Validate template if enabled
+    if (useTemplate && (!emailSubject.trim() || !emailBody.trim())) {
+      toast({
+        title: 'Template Required',
+        description: 'Please provide both subject and body for the email template',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setLoading(true);
     try {
       const { data, error } = await supabase.functions.invoke('execute-campaign', {
@@ -31,6 +44,10 @@ export const TestRunDialog = ({ open, onOpenChange, campaignId }: TestRunDialogP
           execution_type: 'test',
           max_prospects: maxProspects,
           skip_sending: skipSending,
+          email_template: useTemplate ? {
+            subject: emailSubject,
+            body: emailBody,
+          } : null,
         },
       });
 
@@ -68,7 +85,10 @@ export const TestRunDialog = ({ open, onOpenChange, campaignId }: TestRunDialogP
   const handleClose = () => {
     setExecutionId(null);
     setMaxProspects(5);
-    setSkipSending(true);
+    setSkipSending(false);
+    setUseTemplate(true);
+    setEmailSubject('');
+    setEmailBody('');
     onOpenChange(false);
   };
 
@@ -99,6 +119,49 @@ export const TestRunDialog = ({ open, onOpenChange, campaignId }: TestRunDialogP
               <p className="text-xs text-muted-foreground">
                 Maximum 20 prospects for test runs
               </p>
+            </div>
+
+            <div className="space-y-4 p-4 border rounded-lg">
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="use-template"
+                  checked={useTemplate}
+                  onCheckedChange={(checked) => setUseTemplate(checked as boolean)}
+                />
+                <Label
+                  htmlFor="use-template"
+                  className="text-sm font-medium cursor-pointer"
+                >
+                  Use email template (same email for all prospects)
+                </Label>
+              </div>
+
+              {useTemplate && (
+                <div className="space-y-4 pl-6">
+                  <div className="space-y-2">
+                    <Label htmlFor="email-subject">Email Subject</Label>
+                    <Input
+                      id="email-subject"
+                      placeholder="Enter email subject..."
+                      value={emailSubject}
+                      onChange={(e) => setEmailSubject(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="email-body">Email Body</Label>
+                    <textarea
+                      id="email-body"
+                      className="flex min-h-[120px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                      placeholder="Enter email body... Use {name} for personalization."
+                      value={emailBody}
+                      onChange={(e) => setEmailBody(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Tip: Use {'{name}'}, {'{company}'}, {'{title}'} for basic personalization
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center space-x-2">
