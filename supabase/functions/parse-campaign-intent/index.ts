@@ -93,36 +93,38 @@ Examples:
         tools: [
           {
             type: "function",
-            name: "create_campaign_config",
-            description: "Extract campaign configuration from user intent",
-            parameters: {
-              type: "object",
-              properties: {
-                name: { type: "string", description: "Campaign name" },
-                target_criteria: {
-                  type: "object",
-                  description: "Criteria for finding prospects",
-                  properties: {
-                    job_titles: { type: "array", items: { type: "string" } },
-                    industry: { type: "string" },
-                    location: { type: "string" },
-                    company_size: { type: "string" }
-                  }
+            function: {
+              name: "create_campaign_config",
+              description: "Extract campaign configuration from user intent",
+              parameters: {
+                type: "object",
+                properties: {
+                  name: { type: "string", description: "Campaign name" },
+                  target_criteria: {
+                    type: "object",
+                    description: "Criteria for finding prospects",
+                    properties: {
+                      job_titles: { type: "array", items: { type: "string" } },
+                      industry: { type: "string" },
+                      location: { type: "string" },
+                      company_size: { type: "string" }
+                    }
+                  },
+                  tone: {
+                    type: "string",
+                    enum: ["professional", "casual", "friendly"],
+                    description: "Email tone"
+                  },
+                  goal: {
+                    type: "string",
+                    enum: ["meeting", "demo", "call", "information"],
+                    description: "Campaign goal"
+                  },
+                  custom_prompt: { type: "string", description: "Additional instructions" }
                 },
-                tone: {
-                  type: "string",
-                  enum: ["professional", "casual", "friendly"],
-                  description: "Email tone"
-                },
-                goal: {
-                  type: "string",
-                  enum: ["meeting", "demo", "call", "information"],
-                  description: "Campaign goal"
-                },
-                custom_prompt: { type: "string", description: "Additional instructions" }
-              },
-              required: ["name", "target_criteria"],
-              additionalProperties: false
+                required: ["name", "target_criteria"],
+                additionalProperties: false
+              }
             }
           }
         ],
