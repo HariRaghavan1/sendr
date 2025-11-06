@@ -424,6 +424,16 @@ try {
                         
                         setMessages(prev => [...prev, executionMessage]);
 
+                        // Persist execution message to database
+                        if (currentConvId) {
+                          await saveMessage(
+                            currentConvId, 
+                            'assistant', 
+                            executionMessage.content,
+                            executionMessage.metadata
+                          );
+                        }
+
                         // Call execute-workflow edge function (fire and forget)
                         supabase.functions.invoke('execute-workflow', {
                           body: {

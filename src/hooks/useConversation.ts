@@ -83,7 +83,12 @@ export const useConversation = (conversationId?: string) => {
     }
   };
 
-  const saveMessage = async (conversationId: string, role: 'user' | 'assistant', content: string) => {
+  const saveMessage = async (
+    conversationId: string, 
+    role: 'user' | 'assistant', 
+    content: string,
+    metadata?: Message['metadata']
+  ) => {
     try {
       const { error } = await supabase
         .from('conversation_messages')
@@ -91,12 +96,13 @@ export const useConversation = (conversationId?: string) => {
           conversation_id: conversationId,
           role,
           content,
+          metadata,
         });
 
       if (error) throw error;
 
       // Update local state
-      setMessages(prev => [...prev, { role, content }]);
+      setMessages(prev => [...prev, { role, content, metadata }]);
     } catch (error) {
       console.error('Error saving message:', error);
       throw error;
