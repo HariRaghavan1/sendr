@@ -52,21 +52,36 @@ serve(async (req) => {
     // Find prospects (limit to 5 for test runs)
     await updateExecutionLog(supabase, execution_id, 'Finding prospects...');
     
-    const { data: prospectsData, error: findError } = await supabase.functions.invoke('find-prospects', {
-      body: {
-        workflow_id,
-        target_criteria: targetCriteria,
-        limit: 5,
+    // For test runs, create mock prospects instead of calling external API
+    const mockProspects = [
+      {
+        id: crypto.randomUUID(),
+        name: 'Dr. Sarah Johnson',
+        email: 'sarah.johnson@example.edu',
+        title: 'Associate Professor',
+        company: 'University of California',
+        linkedin_url: 'https://linkedin.com/in/sarahjohnson',
       },
-    });
-
-    if (findError) {
-      await failExecution(supabase, execution_id, `Failed to find prospects: ${findError.message}`);
-      throw findError;
-    }
-
-    const prospects = prospectsData?.prospects || [];
+      {
+        id: crypto.randomUUID(),
+        name: 'Prof. Michael Chen',
+        email: 'michael.chen@example.edu',
+        title: 'Professor',
+        company: 'Stanford University',
+        linkedin_url: 'https://linkedin.com/in/michaelchen',
+      },
+      {
+        id: crypto.randomUUID(),
+        name: 'Dr. Emily Rodriguez',
+        email: 'emily.rodriguez@example.edu',
+        title: 'Assistant Professor',
+        company: 'MIT',
+        linkedin_url: 'https://linkedin.com/in/emilyrodriguez',
+      },
+    ];
     
+    const prospects = mockProspects;
+
     if (prospects.length === 0) {
       await updateExecutionLog(supabase, execution_id, 'No prospects found matching criteria');
       await completeExecution(supabase, execution_id);
