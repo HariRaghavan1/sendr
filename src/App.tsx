@@ -8,6 +8,7 @@ import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import Settings from "./pages/Settings";
 import CampaignCreate from "./pages/CampaignCreate";
+import CampaignAICreate from "./pages/CampaignAICreate";
 import CampaignDetail from "./pages/CampaignDetail";
 import NotFound from "./pages/NotFound";
 
@@ -25,6 +26,7 @@ const App = () => (
           <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
           <Route path="/campaigns/new" element={<ProtectedRoute><CampaignCreate /></ProtectedRoute>} />
+          <Route path="/campaigns/ai-create" element={<ProtectedRoute><CampaignAICreate /></ProtectedRoute>} />
           <Route path="/campaigns/:id" element={<ProtectedRoute><CampaignDetail /></ProtectedRoute>} />
           <Route path="*" element={<NotFound />} />
         </Routes>

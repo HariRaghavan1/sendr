@@ -21,3 +21,6 @@ verify_jwt = false
 
 [functions.campaign-scheduler]
 verify_jwt = false
+
+[functions.parse-campaign-intent]
+verify_jwt = true

@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Play, Pause, Settings as SettingsIcon, LogOut, Dog } from "lucide-react";
+import { Plus, Play, Pause, Settings as SettingsIcon, LogOut, Dog, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Dashboard() {
@@ -89,10 +89,16 @@ export default function Dashboard() {
             <h2 className="text-3xl font-bold">Your Campaigns</h2>
             <p className="text-muted-foreground">Manage your outbound campaigns</p>
           </div>
-          <Button onClick={() => navigate("/campaigns/new")}>
-            <Plus className="mr-2 h-4 w-4" />
-            New Campaign
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => navigate("/campaigns/ai-create")}>
+              <Sparkles className="mr-2 h-4 w-4" />
+              AI Create
+            </Button>
+            <Button onClick={() => navigate("/campaigns/new")}>
+              <Plus className="mr-2 h-4 w-4" />
+              New Campaign
+            </Button>
+          </div>
         </div>
 
         {loading ? (
