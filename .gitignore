@@ -29,3 +29,9 @@ dist-ssr
 *.sln
 *.sw?
 .cursor/
+
+# Hardcoded contact data (privacy)
+supabase/functions/_shared/mock-prospects.ts
+**/mock-prospects.ts
+**/hardcoded-prospects.ts
+**/fallback-prospects.ts
