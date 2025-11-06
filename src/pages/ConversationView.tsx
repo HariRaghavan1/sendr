@@ -33,7 +33,6 @@ const ConversationView = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('handleSubmit called, input:', input, 'loading:', loading);
     if (!input.trim() || loading) return;
 
     const userMessage = input.trim();
@@ -63,11 +62,8 @@ const ConversationView = () => {
       const assistantMessageIndex = newMessages.length;
       setMessages([...newMessages, { role: 'assistant', content: '' }]);
 
-      console.log('Calling edge function with messages:', newMessages);
-
       // Stream response from edge function
       const session = await supabase.auth.getSession();
-      console.log('Session:', session.data.session?.access_token ? 'Valid token' : 'No token');
       
       const response = await fetch(
         `https://tbbyxprlgrsrzvxvkpgz.supabase.co/functions/v1/campaign-chat`,
@@ -80,8 +76,6 @@ const ConversationView = () => {
           body: JSON.stringify({ messages: newMessages }),
         }
       );
-
-      console.log('Edge function response status:', response.status);
 
       if (!response.ok) {
         if (response.status === 429) {
@@ -247,7 +241,6 @@ const ConversationView = () => {
 
     } catch (error: any) {
       console.error('Error in chat:', error);
-      console.error('Error stack:', error.stack);
       setMessages(prev => [...prev, {
         role: 'assistant',
         content: error.message || 'Sorry, I encountered an error. Please try again.'

@@ -206,7 +206,19 @@ Be direct and action-oriented. Don't ask unnecessary questions.`
                       target_criteria: { type: "object" },
                       tone: { type: "string" },
                       goal: { type: "string" },
-                      steps: { type: "array" }
+                      steps: { 
+                        type: "array",
+                        items: {
+                          type: "object",
+                          properties: {
+                            action: { 
+                              type: "string",
+                              enum: ["find_prospects", "generate_email", "send_email"]
+                            },
+                            description: { type: "string" }
+                          }
+                        }
+                      }
                     }
                   }
                 },
