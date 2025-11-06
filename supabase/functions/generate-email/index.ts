@@ -60,7 +60,6 @@ serve(async (req) => {
     }
 
     // Build context for email generation
-    const enrichmentSummary = prospect.enrichment_data?.summary || '';
     const toneMap: Record<string, string> = {
       formal: 'professional and formal',
       casual: 'friendly and conversational',
@@ -83,13 +82,13 @@ Guidelines:
 - Use a ${toneInstruction} tone
 - Goal is to ${goalInstruction}
 - Create curiosity, don't hard sell
-- Reference specific, relevant context when available
+- Focus on the prospect's role and potential pain points
 - End with a clear, low-pressure call to action`;
 
-    const userPrompt = `Write a cold email to ${prospect.name}, ${prospect.title} at ${prospect.company}.
+    const userPrompt = `Write a cold email to ${prospect.name}, ${prospect.title || 'professional'} at ${prospect.company || 'their company'}.
 
-Context about their company:
-${enrichmentSummary || 'No additional context available'}
+Target criteria for this campaign:
+${JSON.stringify(campaign.target_criteria, null, 2)}
 
 ${campaign.custom_prompt ? `Additional instructions: ${campaign.custom_prompt}` : ''}
 

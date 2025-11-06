@@ -53,22 +53,7 @@ serve(async (req) => {
     // Process each prospect
     for (const prospect of prospects) {
       try {
-        // 1. Enrich prospect (if needed)
-        if (!prospect.enrichment_data?.summary) {
-          await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/enrich-prospect`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${Deno.env.get('SUPABASE_ANON_KEY')}`,
-            },
-            body: JSON.stringify({
-              prospect_id: prospect.id,
-              company: prospect.company,
-            }),
-          });
-        }
-
-        // 2. Generate email
+        // 1. Generate email
         const generateResponse = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/generate-email`, {
           method: 'POST',
           headers: {
@@ -88,7 +73,7 @@ serve(async (req) => {
 
         const { email } = await generateResponse.json();
 
-        // 3. Send email
+        // 2. Send email
         await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/send-email`, {
           method: 'POST',
           headers: {

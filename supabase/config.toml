@@ -10,9 +10,6 @@ max_rows = 1000
 [functions.find-prospects]
 verify_jwt = true
 
-[functions.enrich-prospect]
-verify_jwt = true
-
 [functions.generate-email]
 verify_jwt = true
 
