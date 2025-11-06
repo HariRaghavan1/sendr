@@ -2169,6 +2169,140 @@ try {
                         });
                       }
                     }}
+                    onSendCampaign={async () => {
+                      const workflowId = message.metadata?.workflowId;
+                      if (!workflowId) {
+                        toast({
+                          title: "Error",
+                          description: "Workflow not saved yet",
+                          variant: "destructive",
+                        });
+                        return;
+                      }
+
+                      // Show confirmation dialog
+                      const confirmed = window.confirm(
+                        "⚠️ You're about to send REAL emails to your prospects.\n\n" +
+                        "This will:\n" +
+                        "• Find prospects based on your criteria\n" +
+                        "• Generate personalized emails\n" +
+                        "• Send emails directly to each prospect\n\n" +
+                        "Are you sure you want to continue?"
+                      );
+
+                      if (!confirmed) {
+                        return;
+                      }
+
+                      try {
+                        const { data: { user } } = await supabase.auth.getUser();
+                        if (!user) throw new Error('Not authenticated');
+
+                        // Create workflow execution record
+                        const { data: execution, error: execError } = await supabase
+                          .from('workflow_executions')
+                          .insert({
+                            workflow_id: workflowId,
+                            user_id: user.id,
+                            execution_type: 'manual',
+                            status: 'running',
+                            prospects_found: 0,
+                            emails_generated: 0,
+                            emails_sent: 0,
+                          })
+                          .select()
+                          .single();
+
+                        if (execError) throw execError;
+
+                        // Add ExecutionMonitor message to chat
+                        const executionMessage: Message = {
+                          role: 'assistant',
+                          content: `🚀 Sending campaign: ${message.metadata.workflowData.name}`,
+                          metadata: {
+                            type: 'execution',
+                            executionId: execution.id,
+                          },
+                        };
+
+                        setMessages(prev => [...prev, executionMessage]);
+
+                        // Persist execution message to database
+                        if (currentConvId) {
+                          await saveMessage(
+                            currentConvId,
+                            'assistant',
+                            executionMessage.content,
+                            executionMessage.metadata
+                          );
+                        }
+
+                        // Call execute-workflow edge function with PRODUCTION SETTINGS
+                        try {
+                          const { data: invokeData, error: invokeError } = await supabase.functions.invoke('execute-workflow', {
+                            body: {
+                              workflow_id: workflowId,
+                              execution_id: execution.id,
+                              conversation_id: currentConvId,
+                              max_prospects: 10,
+                              skip_sending: false,  // ACTUALLY SEND EMAILS
+                              enrich_emails: true,  // Get prospect emails
+                              // No send_drafts_to_email - send to actual prospects
+                            },
+                          });
+
+                          if (invokeError) {
+                            console.error('Error executing workflow:', invokeError);
+
+                            // Check for Gmail connection error
+                            const isGmailError = invokeError.message?.includes('GMAIL_NOT_CONNECTED');
+
+                            if (isGmailError) {
+                              toast({
+                                title: "Gmail Not Connected",
+                                description: "Please connect your Gmail account to send emails.",
+                                variant: "destructive",
+                              });
+                            } else {
+                              toast({
+                                title: "Execution Error",
+                                description: invokeError.message || 'Failed to execute workflow',
+                                variant: "destructive",
+                              });
+                            }
+
+                            // Mark execution as failed
+                            await supabase
+                              .from('workflow_executions')
+                              .update({ status: 'failed' })
+                              .eq('id', execution.id);
+
+                            return;
+                          }
+
+                          console.log('✅ Campaign execution started:', invokeData);
+                        } catch (invokeErr: any) {
+                          console.error('Error invoking execute-workflow:', invokeErr);
+                          toast({
+                            title: "Execution Error",
+                            description: invokeErr.message || 'Failed to invoke execute-workflow function',
+                            variant: "destructive",
+                          });
+                        }
+
+                        toast({
+                          title: "Campaign sending started",
+                          description: `Sending real emails for: ${message.metadata.workflowData.name}`,
+                        });
+
+                      } catch (error: any) {
+                        toast({
+                          title: "Error",
+                          description: error.message,
+                          variant: "destructive",
+                        });
+                      }
+                    }}
                     onDeploy={async () => {
                       const workflowData = message.metadata?.workflowData;
                       const workflowId = message.metadata?.workflowId;

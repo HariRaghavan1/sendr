@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Edit, Play, Rocket, Target, Mail, Search, Clock, FileText, ChevronDown } from "lucide-react";
+import { Edit, Play, Target, Mail, Search, Clock, FileText, ChevronDown, Send } from "lucide-react";
 import { useState } from "react";
 
 interface WorkflowStep {
@@ -35,7 +35,7 @@ interface WorkflowCardProps {
   workflow: WorkflowData;
   onEdit?: () => void;
   onTestRun?: () => void;
-  onDeploy?: () => void;
+  onSendCampaign?: () => void;
 }
 
 const getStepIcon = (action: WorkflowStep["action"]) => {
@@ -64,7 +64,7 @@ const getGoalBadge = (goal: WorkflowData["goal"]) => {
   );
 };
 
-export function WorkflowCard({ workflow, onEdit, onTestRun, onDeploy }: WorkflowCardProps) {
+export function WorkflowCard({ workflow, onEdit, onTestRun, onSendCampaign }: WorkflowCardProps) {
   const [instructionsExpanded, setInstructionsExpanded] = useState(false);
   
   return (
@@ -207,7 +207,7 @@ export function WorkflowCard({ workflow, onEdit, onTestRun, onDeploy }: Workflow
         </div>
 
         {/* Actions */}
-        <div className="flex items-center gap-2 pt-4 border-t">
+        <div className="flex items-center gap-2 pt-4 border-t flex-wrap">
           {onEdit && (
             <Button variant="outline" size="sm" onClick={onEdit}>
               <FileText className="h-4 w-4 mr-2" />
@@ -220,10 +220,10 @@ export function WorkflowCard({ workflow, onEdit, onTestRun, onDeploy }: Workflow
               Test Run
             </Button>
           )}
-          {onDeploy && (
-            <Button variant="default" size="sm" onClick={onDeploy}>
-              <Rocket className="h-4 w-4 mr-2" />
-              Deploy
+          {onSendCampaign && (
+            <Button variant="default" size="sm" onClick={onSendCampaign} className="bg-green-600 hover:bg-green-700">
+              <Send className="h-4 w-4 mr-2" />
+              Send Campaign
             </Button>
           )}
         </div>
