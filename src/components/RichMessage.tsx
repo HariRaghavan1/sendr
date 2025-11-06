@@ -6,7 +6,6 @@ import {
   Rocket,
   Copy,
   Sparkles,
-  CheckCircle2,
   ArrowRight,
   Eye,
 } from 'lucide-react';

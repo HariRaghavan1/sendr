@@ -214,8 +214,6 @@ let accumulatedToolCalls: Map<number, any> = new Map();
 
               if (workflowError) throw workflowError;
 
-              workflowData.id = workflow.id;
-
               // Create the campaign
               const { data: campaign, error: campaignError } = await supabase
                 .from('campaigns')
@@ -543,7 +541,7 @@ try {
                         const { data: { user } } = await supabase.auth.getUser();
                         if (!user) throw new Error('Not authenticated');
 
-                        const { data: campaign, error: campaignError } = await supabase
+                        const { error: campaignError } = await supabase
                           .from('campaigns')
                           .insert({
                             user_id: user.id,

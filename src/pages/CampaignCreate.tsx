@@ -67,11 +67,11 @@ export default function CampaignCreate() {
       .insert([{
         user_id: user.id,
         name: formData.name,
-        target_criteria: formData.target_criteria,
+        target_criteria: formData.target_criteria as any,
         tone: formData.tone,
         goal: formData.goal,
         custom_prompt: formData.custom_prompt,
-        frequency_config: frequencyConfig,
+        frequency_config: frequencyConfig as any,
         status: "draft" as CampaignStatus,
       }])
       .select()
@@ -172,7 +172,7 @@ export default function CampaignCreate() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="tone">Email Tone</Label>
-                  <Select value={formData.tone} onValueChange={(value) => setFormData({ ...formData, tone: value })}>
+                  <Select value={formData.tone} onValueChange={(value) => setFormData({ ...formData, tone: value as EmailTone })}>
                     <SelectTrigger id="tone">
                       <SelectValue />
                     </SelectTrigger>
@@ -186,7 +186,7 @@ export default function CampaignCreate() {
 
                 <div className="space-y-2">
                   <Label htmlFor="goal">Email Goal</Label>
-                  <Select value={formData.goal} onValueChange={(value) => setFormData({ ...formData, goal: value })}>
+                  <Select value={formData.goal} onValueChange={(value) => setFormData({ ...formData, goal: value as EmailGoal })}>
                     <SelectTrigger id="goal">
                       <SelectValue />
                     </SelectTrigger>

@@ -132,14 +132,19 @@ export default function Workflows() {
   };
 
   const handleDuplicate = async (campaign: Campaign) => {
-    const { data, error } = await supabase
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { error } = await supabase
       .from("campaigns")
-      .insert({
+      .insert([{
+        user_id: user.id,
         name: `${campaign.name} (Copy)`,
-        goal: campaign.goal,
-        tone: campaign.tone,
+        goal: campaign.goal as any,
+        tone: campaign.tone as any,
         status: 'draft',
-      })
+        target_criteria: campaign.target_criteria || {},
+      }])
       .select()
       .single();
 

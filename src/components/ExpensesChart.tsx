@@ -48,7 +48,7 @@ export const ExpensesChart = () => {
             <XAxis type="number" dataKey="x" hide />
             <YAxis type="number" dataKey="y" hide />
             <Scatter data={data} fill="hsl(var(--primary))">
-              {data.map((entry, index) => (
+              {data.map((_entry, index) => (
                 <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
               ))}
             </Scatter>

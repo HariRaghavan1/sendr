@@ -78,7 +78,7 @@ export function WorkflowEditDialog({
   const [formData, setFormData] = useState<FormData>({
     name: '',
     goal: 'meeting',
-    tone: 'professional',
+    tone: 'casual',
     target_criteria: {
       industry: '',
       location: '',
@@ -240,8 +240,8 @@ export function WorkflowEditDialog({
                   <SelectContent>
                     <SelectItem value="meeting">Schedule Meeting</SelectItem>
                     <SelectItem value="demo">Request Demo</SelectItem>
-                    <SelectItem value="call">Schedule Call</SelectItem>
-                    <SelectItem value="information">Share Information</SelectItem>
+                    <SelectItem value="partnership">Explore Partnership</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -256,9 +256,9 @@ export function WorkflowEditDialog({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="professional">Professional</SelectItem>
+                    <SelectItem value="formal">Formal</SelectItem>
                     <SelectItem value="casual">Casual</SelectItem>
-                    <SelectItem value="friendly">Friendly</SelectItem>
+                    <SelectItem value="witty">Witty</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

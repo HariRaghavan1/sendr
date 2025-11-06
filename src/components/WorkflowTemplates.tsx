@@ -59,7 +59,7 @@ const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     color: 'text-blue-500',
     bgColor: 'bg-blue-500/10',
     goal: 'demo',
-    tone: 'professional',
+    tone: 'formal',
     targetCriteria: {
       job_titles: ['CEO', 'CTO', 'VP of Sales', 'Director of Marketing'],
       industry: 'Technology',
@@ -78,8 +78,8 @@ const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     icon: Handshake,
     color: 'text-purple-500',
     bgColor: 'bg-purple-500/10',
-    goal: 'meeting',
-    tone: 'professional',
+    goal: 'partnership',
+    tone: 'formal',
     targetCriteria: {
       job_titles: ['VP of Partnerships', 'Head of Business Development', 'CEO', 'COO'],
       industry: '',
@@ -99,7 +99,7 @@ const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     color: 'text-green-500',
     bgColor: 'bg-green-500/10',
     goal: 'meeting',
-    tone: 'friendly',
+    tone: 'casual',
     targetCriteria: {
       job_titles: ['Product Manager', 'Engineer', 'Designer', 'Data Scientist'],
       industry: 'Technology',
@@ -118,8 +118,8 @@ const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     icon: Rocket,
     color: 'text-orange-500',
     bgColor: 'bg-orange-500/10',
-    goal: 'information',
-    tone: 'professional',
+    goal: 'other',
+    tone: 'formal',
     targetCriteria: {
       job_titles: ['Product Manager', 'CTO', 'VP of Engineering'],
       industry: 'Technology',
@@ -138,8 +138,8 @@ const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     icon: MessageSquare,
     color: 'text-pink-500',
     bgColor: 'bg-pink-500/10',
-    goal: 'call',
-    tone: 'friendly',
+    goal: 'other',
+    tone: 'casual',
     targetCriteria: {
       job_titles: [],
       industry: '',
@@ -158,7 +158,7 @@ const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     icon: Mail,
     color: 'text-cyan-500',
     bgColor: 'bg-cyan-500/10',
-    goal: 'information',
+    goal: 'other',
     tone: 'casual',
     targetCriteria: {
       job_titles: ['Marketing Manager', 'Content Strategist', 'CMO'],

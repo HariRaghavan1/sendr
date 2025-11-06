@@ -12,26 +12,12 @@ import {
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
-import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from './ui/dropdown-menu';
 import {
   Play,
   Pause,
-  Copy,
-  Edit,
-  Trash2,
-  MoreHorizontal,
-  TestTube,
   FileEdit,
   CheckCircle2,
-  Clock,
-  Sparkles,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { SortableWorkflowCard } from './SortableWorkflowCard';
@@ -47,6 +33,9 @@ export interface Campaign {
   total_replied?: number;
   created_at: string;
   updated_at?: string;
+  target_criteria?: any;
+  custom_prompt?: string;
+  frequency_config?: any;
 }
 
 interface WorkflowKanbanProps {

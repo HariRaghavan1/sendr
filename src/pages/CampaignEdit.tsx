@@ -13,7 +13,6 @@ import { toast } from "sonner";
 
 type EmailTone = Database['public']['Enums']['email_tone'];
 type EmailGoal = Database['public']['Enums']['email_goal'];
-type Campaign = Database['public']['Tables']['campaigns']['Row'];
 
 interface TargetCriteria {
   industry: string;
@@ -64,12 +63,12 @@ export default function CampaignEdit() {
       if (error) throw error;
 
       if (data) {
-        const criteria = data.target_criteria as TargetCriteria || {
+        const criteria = (data.target_criteria as any) || {
           industry: "",
           location: "",
           job_titles: "",
         };
-        const freqConfig = data.frequency_config as FrequencyConfig || {
+        const freqConfig = (data.frequency_config as any) || {
           type: "daily",
           time: "09:00",
           batch_size: 25,
@@ -118,11 +117,11 @@ export default function CampaignEdit() {
       .from("campaigns")
       .update({
         name: formData.name,
-        target_criteria: formData.target_criteria,
+        target_criteria: formData.target_criteria as any,
         tone: formData.tone,
         goal: formData.goal,
         custom_prompt: formData.custom_prompt,
-        frequency_config: frequencyConfig,
+        frequency_config: frequencyConfig as any,
       })
       .eq("id", id)
       .eq("user_id", user.id);
