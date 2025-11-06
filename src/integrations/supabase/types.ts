@@ -14,16 +14,355 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      campaigns: {
+        Row: {
+          created_at: string
+          custom_prompt: string | null
+          frequency_config: Json
+          goal: Database["public"]["Enums"]["email_goal"]
+          id: string
+          last_run_at: string | null
+          name: string
+          next_run_at: string | null
+          status: Database["public"]["Enums"]["campaign_status"]
+          target_criteria: Json
+          tone: Database["public"]["Enums"]["email_tone"]
+          total_bounced: number
+          total_opened: number
+          total_replied: number
+          total_sent: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          custom_prompt?: string | null
+          frequency_config?: Json
+          goal?: Database["public"]["Enums"]["email_goal"]
+          id?: string
+          last_run_at?: string | null
+          name: string
+          next_run_at?: string | null
+          status?: Database["public"]["Enums"]["campaign_status"]
+          target_criteria?: Json
+          tone?: Database["public"]["Enums"]["email_tone"]
+          total_bounced?: number
+          total_opened?: number
+          total_replied?: number
+          total_sent?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          custom_prompt?: string | null
+          frequency_config?: Json
+          goal?: Database["public"]["Enums"]["email_goal"]
+          id?: string
+          last_run_at?: string | null
+          name?: string
+          next_run_at?: string | null
+          status?: Database["public"]["Enums"]["campaign_status"]
+          target_criteria?: Json
+          tone?: Database["public"]["Enums"]["email_tone"]
+          total_bounced?: number
+          total_opened?: number
+          total_replied?: number
+          total_sent?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      emails: {
+        Row: {
+          body: string
+          bounce_reason: string | null
+          campaign_id: string
+          created_at: string
+          external_id: string | null
+          id: string
+          opened_at: string | null
+          prospect_id: string
+          replied_at: string | null
+          sent_at: string | null
+          subject: string
+          user_id: string
+        }
+        Insert: {
+          body: string
+          bounce_reason?: string | null
+          campaign_id: string
+          created_at?: string
+          external_id?: string | null
+          id?: string
+          opened_at?: string | null
+          prospect_id: string
+          replied_at?: string | null
+          sent_at?: string | null
+          subject: string
+          user_id: string
+        }
+        Update: {
+          body?: string
+          bounce_reason?: string | null
+          campaign_id?: string
+          created_at?: string
+          external_id?: string | null
+          id?: string
+          opened_at?: string | null
+          prospect_id?: string
+          replied_at?: string | null
+          sent_at?: string | null
+          subject?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "emails_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "emails_prospect_id_fkey"
+            columns: ["prospect_id"]
+            isOneToOne: false
+            referencedRelation: "prospects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      follow_ups: {
+        Row: {
+          body: string | null
+          campaign_id: string
+          created_at: string
+          email_id: string
+          id: string
+          prospect_id: string
+          scheduled_for: string
+          sent_at: string | null
+          sequence_number: number
+          status: string
+          subject: string | null
+        }
+        Insert: {
+          body?: string | null
+          campaign_id: string
+          created_at?: string
+          email_id: string
+          id?: string
+          prospect_id: string
+          scheduled_for: string
+          sent_at?: string | null
+          sequence_number?: number
+          status?: string
+          subject?: string | null
+        }
+        Update: {
+          body?: string | null
+          campaign_id?: string
+          created_at?: string
+          email_id?: string
+          id?: string
+          prospect_id?: string
+          scheduled_for?: string
+          sent_at?: string | null
+          sequence_number?: number
+          status?: string
+          subject?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "follow_ups_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "follow_ups_email_id_fkey"
+            columns: ["email_id"]
+            isOneToOne: false
+            referencedRelation: "emails"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "follow_ups_prospect_id_fkey"
+            columns: ["prospect_id"]
+            isOneToOne: false
+            referencedRelation: "prospects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string
+          display_name: string | null
+          id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      prospects: {
+        Row: {
+          campaign_id: string
+          company: string | null
+          created_at: string
+          email: string
+          enrichment_data: Json | null
+          id: string
+          linkedin_url: string | null
+          name: string
+          notes: string | null
+          status: Database["public"]["Enums"]["prospect_status"]
+          title: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          campaign_id: string
+          company?: string | null
+          created_at?: string
+          email: string
+          enrichment_data?: Json | null
+          id?: string
+          linkedin_url?: string | null
+          name: string
+          notes?: string | null
+          status?: Database["public"]["Enums"]["prospect_status"]
+          title?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          campaign_id?: string
+          company?: string | null
+          created_at?: string
+          email?: string
+          enrichment_data?: Json | null
+          id?: string
+          linkedin_url?: string | null
+          name?: string
+          notes?: string | null
+          status?: Database["public"]["Enums"]["prospect_status"]
+          title?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "prospects_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_roles: {
+        Row: {
+          created_at: string
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_settings: {
+        Row: {
+          clado_api_key: string | null
+          composio_api_key: string | null
+          created_at: string
+          email_provider_config: Json | null
+          id: string
+          openai_api_key: string | null
+          perplexity_api_key: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          clado_api_key?: string | null
+          composio_api_key?: string | null
+          created_at?: string
+          email_provider_config?: Json | null
+          id?: string
+          openai_api_key?: string | null
+          perplexity_api_key?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          clado_api_key?: string | null
+          composio_api_key?: string | null
+          created_at?: string
+          email_provider_config?: Json | null
+          id?: string
+          openai_api_key?: string | null
+          perplexity_api_key?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin" | "user"
+      campaign_status: "draft" | "active" | "paused" | "completed"
+      email_goal: "demo" | "meeting" | "partnership" | "other"
+      email_tone: "formal" | "casual" | "witty"
+      prospect_status:
+        | "pending"
+        | "sent"
+        | "opened"
+        | "replied"
+        | "bounced"
+        | "unsubscribed"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +489,19 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin", "user"],
+      campaign_status: ["draft", "active", "paused", "completed"],
+      email_goal: ["demo", "meeting", "partnership", "other"],
+      email_tone: ["formal", "casual", "witty"],
+      prospect_status: [
+        "pending",
+        "sent",
+        "opened",
+        "replied",
+        "bounced",
+        "unsubscribed",
+      ],
+    },
   },
 } as const

@@ -1,1 +1,26 @@
 project_id = "tbbyxprlgrsrzvxvkpgz"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "storage"]
+extra_search_path = ["public"]
+max_rows = 1000
+
+[functions.find-prospects]
+verify_jwt = true
+
+[functions.enrich-prospect]
+verify_jwt = true
+
+[functions.generate-email]
+verify_jwt = true
+
+[functions.send-email]
+verify_jwt = true
+
+[functions.process-batch]
+verify_jwt = false
+
+[functions.campaign-scheduler]
+verify_jwt = false
