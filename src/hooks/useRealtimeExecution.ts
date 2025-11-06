@@ -90,13 +90,15 @@ export const useRealtimeExecution = (executionId?: string) => {
             execution_type: 'test' as const,
             progress_logs: workflowData.execution_log || [],
             total_prospects: workflowData.total_prospects || workflowData.prospects_found || 0,
-            processed_prospects: workflowData.processed_prospects || workflowData.emails_generated || 0,
+            processed_prospects: workflowData.emails_generated || 0,
             started_at: workflowData.started_at,
             completed_at: workflowData.completed_at,
-            prospects_data: workflowData.prospects_data || [],
-            emails_data: workflowData.emails_data || [],
-            performance_metrics: workflowData.performance_metrics || {},
-          };
+          } as any;
+          
+          // Add optional fields if they exist
+          (data as any).prospects_data = (workflowData as any).prospects_data || [];
+          (data as any).emails_data = (workflowData as any).emails_data || [];
+          (data as any).performance_metrics = (workflowData as any).performance_metrics || {};
         }
       }
 
@@ -137,12 +139,12 @@ export const useRealtimeExecution = (executionId?: string) => {
               execution_type: 'test' as const,
               progress_logs: payload.new.execution_log || [],
               total_prospects: payload.new.total_prospects || payload.new.prospects_found || 0,
-              processed_prospects: payload.new.processed_prospects || payload.new.emails_generated || 0,
+              processed_prospects: payload.new.emails_generated || 0,
               started_at: payload.new.started_at,
               completed_at: payload.new.completed_at,
-              prospects_data: payload.new.prospects_data || [],
-              emails_data: payload.new.emails_data || [],
-              performance_metrics: payload.new.performance_metrics || {},
+              prospects_data: (payload.new as any).prospects_data || [],
+              emails_data: (payload.new as any).emails_data || [],
+              performance_metrics: (payload.new as any).performance_metrics || {},
             };
             setExecution(mapped);
           }

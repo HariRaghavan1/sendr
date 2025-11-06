@@ -1,5 +1,9 @@
 import { Card } from "@/components/ui/card";
-import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell, Line, LineChart } from "recharts";
+import {
+  ResponsiveContainer,
+  Line,
+  LineChart
+} from "recharts";
 import { MoreVertical } from "lucide-react";
 
 const data = [

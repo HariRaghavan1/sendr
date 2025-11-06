@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { MessageSquare, Plus, Settings as SettingsIcon, LogOut, LayoutGrid } from "lucide-react";
+import { MessageSquare, LogOut, LayoutGrid, Settings as SettingsIcon } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -15,7 +15,6 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
-import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import { ConversationList } from "./ConversationList";
@@ -24,27 +23,13 @@ export function AppSidebar() {
   const navigate = useNavigate();
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
-  const [campaigns, setCampaigns] = useState<any[]>([]);
   const [user, setUser] = useState<any>(null);
 
   useEffect(() => {
-    loadCampaigns();
     supabase.auth.getUser().then(({ data: { user } }) => {
       setUser(user);
     });
   }, []);
-
-  const loadCampaigns = async () => {
-    const { data, error } = await supabase
-      .from("campaigns")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(10);
-
-    if (!error) {
-      setCampaigns(data || []);
-    }
-  };
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();

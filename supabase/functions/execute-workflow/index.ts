@@ -155,17 +155,19 @@ serve(async (req) => {
     await updateExecutionLog(supabase, execution_id, '[1/3] ✅ API keys validated');
 
     // Find prospects (limit to 5 for test runs)
-    await updateExecutionLog(supabase, execution_id, '[2/3] 🔍 Clado: Searching for prospects...');
+    // Find prospects using PARALLEL multi-query strategy
+    await updateExecutionLog(supabase, execution_id, '[2/3] 🔍 Clado: Launching parallel searches...');
     console.log('Calling Clado with criteria:', targetCriteria);
 
+    const searchStartTime = Date.now();
     let prospects: any[] = [];
+    
     try {
       // Helper function to build query from criteria
       const buildQuery = (criteria: any) => {
         const queryParts: string[] = [];
 
         if (criteria.job_titles) {
-          // Handle array of job titles
           const titles = Array.isArray(criteria.job_titles)
             ? criteria.job_titles.join(' or ')
             : criteria.job_titles;
@@ -184,146 +186,208 @@ serve(async (req) => {
         return queryParts.join(' ') || 'professionals';
       };
 
-      // Helper function to try Clado search
-      const trySearch = async (query: string, attemptDescription: string) => {
-        console.log(`${attemptDescription}: "${query}"`);
-        await updateExecutionLog(supabase, execution_id, `[2/3] 🔍 Trying: ${query}`);
-
-        const cladoApiUrl = new URL('https://search.clado.ai/api/search');
-        cladoApiUrl.searchParams.append('query', query);
-        cladoApiUrl.searchParams.append('limit', '5');
-
-        const cladoResponse = await fetch(cladoApiUrl.toString(), {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${settings.clado_api_key}`,
-          },
-        });
-
-        console.log(`Clado response status (${attemptDescription}):`, cladoResponse.status);
-
-        if (!cladoResponse.ok) {
-          const errorText = await cladoResponse.text();
-          console.error('Clado error response:', errorText);
-          throw new Error(`Clado API returned ${cladoResponse.status}: ${errorText}`);
-        }
-
-        const cladoData = await cladoResponse.json();
-        return (cladoData.results || []).map((result: any) => {
-          const profile = result.profile || {};
-          const experience = result.experience?.[0] || {};
-
-          return {
-            id: profile.id || crypto.randomUUID(),
-            name: profile.name || 'Unknown',
-            email: '', // Email enrichment happens separately via Enrichment API
-            title: experience.title || profile.headline || '',
-            company: experience.company_name || '',
-            linkedin_url: profile.linkedin_url || '',
-          };
-        });
-      };
-
-      // Progressive fallback strategy - try increasingly broader queries
-      const searchStrategies = [
-        {
-          criteria: targetCriteria,
-          description: 'Full criteria'
-        },
-        {
-          criteria: {
-            job_titles: targetCriteria.job_titles,
-            industry: targetCriteria.industry,
-            location: targetCriteria.location
-          },
-          description: 'Without company size'
-        },
-        {
-          criteria: {
-            job_titles: targetCriteria.job_titles,
-            industry: targetCriteria.industry
-          },
-          description: 'Job titles + industry only'
-        },
-        {
-          criteria: {
-            job_titles: targetCriteria.job_titles
-          },
-          description: 'Job titles only'
-        },
-        {
-          criteria: {
-            industry: targetCriteria.industry
-          },
-          description: 'Industry only (broadest)'
-        }
-      ];
-
-      // Try each strategy until we get results
-      for (const strategy of searchStrategies) {
-        const query = buildQuery(strategy.criteria);
-
-        // Skip if query is empty or same as previous
-        if (!query || query === 'professionals') continue;
+      // Helper function to try Clado search with timeout
+      const trySearchWithTimeout = async (query: string, description: string, timeoutMs: number = 30000) => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
         try {
-          prospects = await trySearch(query, strategy.description);
+          await updateExecutionLog(supabase, execution_id, `[2/3] 🔍 Query "${description}": ${query}`);
+          console.log(`Launching query: ${description}`);
 
-          if (prospects.length > 0) {
-            console.log(`✓ Found ${prospects.length} prospects using: ${strategy.description}`);
+          const cladoApiUrl = new URL('https://search.clado.ai/api/search');
+          cladoApiUrl.searchParams.append('query', query);
+          cladoApiUrl.searchParams.append('limit', '5');
+
+          const startTime = Date.now();
+          const cladoResponse = await fetch(cladoApiUrl.toString(), {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${settings.clado_api_key}`,
+            },
+            signal: controller.signal,
+          });
+
+          clearTimeout(timeout);
+          const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+
+          if (!cladoResponse.ok) {
+            const errorText = await cladoResponse.text();
+            console.error(`Clado error for ${description}:`, errorText);
+            await updateExecutionLog(supabase, execution_id, `[2/3] ❌ Query "${description}" failed (${duration}s)`);
+            return [];
+          }
+
+          const cladoData = await cladoResponse.json();
+          const results = (cladoData.results || []).map((result: any) => {
+            const profile = result.profile || {};
+            const experience = result.experience?.[0] || {};
+
+            return {
+              id: profile.id || crypto.randomUUID(),
+              name: profile.name || 'Unknown',
+              email: '',
+              title: experience.title || profile.headline || '',
+              company: experience.company_name || '',
+              linkedin_url: profile.linkedin_url || '',
+            };
+          });
+
+          if (results.length > 0) {
             await updateExecutionLog(
-              supabase,
-              execution_id,
-              `[2/3] ✅ Clado: Found ${prospects.length} prospects (${strategy.description})`
+              supabase, 
+              execution_id, 
+              `[2/3] ✅ Query "${description}": ${results.length} prospects (${duration}s)`
             );
-
-            // Store structured prospect data for UI
-            for (let i = 0; i < prospects.length; i++) {
-              const prospectData = {
-                id: prospects[i].id,
-                name: prospects[i].name,
-                title: prospects[i].title,
-                company: prospects[i].company,
-                linkedin_url: prospects[i].linkedin_url,
-                found_at: new Date().toISOString(),
-                index: i
-              };
-
-              // Add to prospects_data array
-              await supabase.rpc('add_prospect_to_execution', {
-                p_execution_id: execution_id,
-                p_prospect: prospectData
-              });
-
-              // Log individual prospect found (for real-time UI updates)
-              await updateExecutionLog(
-                supabase,
-                execution_id,
-                JSON.stringify({
-                  type: 'prospect_found',
-                  data: prospectData
-                })
-              );
-            }
-
-            break;
           } else {
-            console.log(`✗ No results for: ${strategy.description}, trying broader search...`);
+            await updateExecutionLog(
+              supabase, 
+              execution_id, 
+              `[2/3] ⚠️ Query "${description}": 0 prospects (${duration}s)`
+            );
           }
-        } catch (err) {
-          // If this strategy fails, try the next one
-          console.error(`Search failed for ${strategy.description}:`, err);
-          if (strategy === searchStrategies[searchStrategies.length - 1]) {
-            throw err; // Re-throw on last attempt
+
+          console.log(`Query ${description} completed: ${results.length} prospects in ${duration}s`);
+          return results;
+
+        } catch (error: any) {
+          clearTimeout(timeout);
+          if (error.name === 'AbortError') {
+            console.error(`Query ${description} timed out`);
+            await updateExecutionLog(supabase, execution_id, `[2/3] ⏱️ Query "${description}" timed out`);
+          } else {
+            console.error(`Query ${description} failed:`, error);
           }
+          return [];
         }
+      };
+
+      // Generate 5 query variations for parallel execution
+      const queryStrategies = [
+        { criteria: targetCriteria, description: 'Full criteria' },
+        { 
+          criteria: { 
+            job_titles: targetCriteria.job_titles, 
+            industry: targetCriteria.industry, 
+            location: targetCriteria.location 
+          }, 
+          description: 'No company size' 
+        },
+        { 
+          criteria: { 
+            job_titles: targetCriteria.job_titles, 
+            industry: targetCriteria.industry 
+          }, 
+          description: 'Job + industry' 
+        },
+        { 
+          criteria: { 
+            job_titles: targetCriteria.job_titles, 
+            location: targetCriteria.location 
+          }, 
+          description: 'Job + location' 
+        },
+        { 
+          criteria: { 
+            job_titles: targetCriteria.job_titles 
+          }, 
+          description: 'Job titles only' 
+        },
+      ];
+
+      // Execute all queries in parallel
+      await updateExecutionLog(
+        supabase, 
+        execution_id, 
+        `[2/3] 🚀 Launching ${queryStrategies.length} parallel Clado searches...`
+      );
+
+      const searchPromises = queryStrategies.map(strategy => {
+        const query = buildQuery(strategy.criteria);
+        return query && query !== 'professionals' 
+          ? trySearchWithTimeout(query, strategy.description)
+          : Promise.resolve([]);
+      });
+
+      const results = await Promise.allSettled(searchPromises);
+      
+      // Merge and deduplicate results
+      const allProspects: any[] = [];
+      const seen = new Set<string>();
+
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled' && result.value.length > 0) {
+          result.value.forEach((prospect: any) => {
+            // Deduplicate by LinkedIn URL or name+company
+            const key = prospect.linkedin_url || `${prospect.name}|${prospect.company}`;
+            if (!seen.has(key)) {
+              seen.add(key);
+              allProspects.push(prospect);
+            }
+          });
+        }
+      });
+
+      prospects = allProspects.slice(0, 5); // Limit to 5 for test runs
+      
+      const searchDuration = ((Date.now() - searchStartTime) / 1000).toFixed(1);
+      
+      if (prospects.length > 0) {
+        await updateExecutionLog(
+          supabase, 
+          execution_id, 
+          `[2/3] ✅ Clado: Found ${prospects.length} unique prospects in ${searchDuration}s`
+        );
+
+        // Store structured prospect data for UI with real-time updates
+        for (let i = 0; i < prospects.length; i++) {
+          const prospectData = {
+            id: prospects[i].id,
+            name: prospects[i].name,
+            title: prospects[i].title,
+            company: prospects[i].company,
+            linkedin_url: prospects[i].linkedin_url,
+            found_at: new Date().toISOString(),
+            index: i
+          };
+
+          // Add to prospects_data array
+          await supabase.rpc('add_prospect_to_execution', {
+            p_execution_id: execution_id,
+            p_prospect: prospectData
+          });
+
+          // Log individual prospect found (for real-time UI updates)
+          await updateExecutionLog(
+            supabase,
+            execution_id,
+            JSON.stringify({
+              type: 'prospect_found',
+              data: prospectData
+            })
+          );
+        }
+      } else {
+        await updateExecutionLog(
+          supabase, 
+          execution_id, 
+          `[2/3] ⚠️ No prospects found after ${searchDuration}s`
+        );
       }
 
-      if (prospects.length === 0) {
-        await updateExecutionLog(supabase, execution_id, '[2/3] ⚠️ No prospects found after trying all search strategies');
-      }
+      // Update performance metrics
+      await supabase
+        .from('workflow_executions')
+        .update({ 
+          performance_metrics: {
+            clado_search_ms: Date.now() - searchStartTime,
+            queries_executed: queryStrategies.length,
+            prospects_found: prospects.length
+          }
+        })
+        .eq('id', execution_id);
 
-      console.log(`Final result: Retrieved ${prospects.length} prospects`);
+      console.log(`Parallel search completed: ${prospects.length} prospects in ${searchDuration}s`);
       
     } catch (error: any) {
       let errorMsg = `Clado API error: ${error.message}`;

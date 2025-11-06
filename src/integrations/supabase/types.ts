@@ -459,45 +459,57 @@ export type Database = {
         Row: {
           campaign_id: string | null
           completed_at: string | null
+          emails_data: Json | null
           emails_generated: number | null
           emails_sent: number | null
           error_message: string | null
           execution_log: Json | null
           execution_type: string
           id: string
+          performance_metrics: Json | null
+          prospects_data: Json | null
           prospects_found: number | null
           started_at: string | null
           status: string
+          total_prospects: number | null
           user_id: string
           workflow_id: string | null
         }
         Insert: {
           campaign_id?: string | null
           completed_at?: string | null
+          emails_data?: Json | null
           emails_generated?: number | null
           emails_sent?: number | null
           error_message?: string | null
           execution_log?: Json | null
           execution_type?: string
           id?: string
+          performance_metrics?: Json | null
+          prospects_data?: Json | null
           prospects_found?: number | null
           started_at?: string | null
           status?: string
+          total_prospects?: number | null
           user_id: string
           workflow_id?: string | null
         }
         Update: {
           campaign_id?: string | null
           completed_at?: string | null
+          emails_data?: Json | null
           emails_generated?: number | null
           emails_sent?: number | null
           error_message?: string | null
           execution_log?: Json | null
           execution_type?: string
           id?: string
+          performance_metrics?: Json | null
+          prospects_data?: Json | null
           prospects_found?: number | null
           started_at?: string | null
           status?: string
+          total_prospects?: number | null
           user_id?: string
           workflow_id?: string | null
         }
@@ -573,6 +585,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      add_email_to_execution: {
+        Args: { p_email: Json; p_execution_id: string }
+        Returns: undefined
+      }
+      add_prospect_to_execution: {
+        Args: { p_execution_id: string; p_prospect: Json }
+        Returns: undefined
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
