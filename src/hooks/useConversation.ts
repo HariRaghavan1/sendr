@@ -5,10 +5,11 @@ export interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
   metadata?: {
-    type?: 'workflow' | 'campaign';
+    type?: 'workflow' | 'campaign' | 'execution';
     workflowId?: string;
     workflowData?: any;
     campaignId?: string;
+    executionId?: string;
   };
 }
 

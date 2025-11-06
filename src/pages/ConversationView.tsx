@@ -7,6 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useConversation, Message } from "@/hooks/useConversation";
 import { Send, Sparkles, Loader2 } from "lucide-react";
 import { WorkflowCard } from "@/components/WorkflowCard";
+import { ExecutionMonitor } from "@/components/ExecutionMonitor";
 
 const ConversationView = () => {
   const { conversationId } = useParams();
@@ -347,28 +348,57 @@ const ConversationView = () => {
                         const { data: { user } } = await supabase.auth.getUser();
                         if (!user) throw new Error('Not authenticated');
 
-                        const { data: execution } = await supabase
+                        // Create workflow execution record
+                        const { data: execution, error: execError } = await supabase
                           .from('workflow_executions')
                           .insert({
                             workflow_id: workflowId,
                             user_id: user.id,
-                            execution_type: 'test',
-                            status: 'running'
+                            execution_type: 'manual',
+                            status: 'running',
+                            prospects_found: 0,
+                            emails_generated: 0,
+                            emails_sent: 0,
                           })
                           .select()
                           .single();
 
-                        toast({
-                          title: "Test run started",
-                          description: "Testing workflow with sample prospects...",
+                        if (execError) throw execError;
+
+                        // Add ExecutionMonitor message to chat
+                        const executionMessage: Message = {
+                          role: 'assistant',
+                          content: `Starting test run for workflow: ${message.metadata.workflowData.name}`,
+                          metadata: {
+                            type: 'execution',
+                            executionId: execution.id,
+                          },
+                        };
+                        
+                        setMessages(prev => [...prev, executionMessage]);
+
+                        // Call execute-workflow edge function (fire and forget)
+                        supabase.functions.invoke('execute-workflow', {
+                          body: {
+                            workflow_id: workflowId,
+                            execution_id: execution.id,
+                          },
+                        }).then(({ error }) => {
+                          if (error) {
+                            console.error('Error executing workflow:', error);
+                            toast({
+                              title: "Execution Error",
+                              description: error.message,
+                              variant: "destructive",
+                            });
+                          }
                         });
 
-                        setTimeout(() => {
-                          toast({
-                            title: "Test run complete",
-                            description: "Workflow tested successfully",
-                          });
-                        }, 2000);
+                        toast({
+                          title: "Test run started",
+                          description: `Running test for workflow: ${message.metadata.workflowData.name}`,
+                        });
+
                       } catch (error: any) {
                         toast({
                           title: "Error",
@@ -432,11 +462,15 @@ const ConversationView = () => {
                       }
                     }}
                   />
-                  {message.content && (
+                   {message.content && (
                     <div className="bg-card border border-border rounded-2xl px-5 py-3.5 shadow-sm">
                       <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p>
                     </div>
                   )}
+                </div>
+              ) : message.role === 'assistant' && message.metadata?.type === 'execution' ? (
+                <div className="max-w-[90%]">
+                  <ExecutionMonitor executionId={message.metadata.executionId!} />
                 </div>
               ) : (
                 <div
