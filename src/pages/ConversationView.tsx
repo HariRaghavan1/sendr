@@ -91,8 +91,9 @@ const ConversationView = () => {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let textBuffer = '';
-      let streamedContent = '';
-      let accumulatedToolCalls: Map<number, any> = new Map();
+let streamedContent = '';
+let finalAssistantContent = '';
+let accumulatedToolCalls: Map<number, any> = new Map();
 
       while (true) {
         const { done, value } = await reader.read();
@@ -160,10 +161,8 @@ const ConversationView = () => {
         }
       }
 
-      // Save the final assistant message
-      if (convId) {
-        await saveMessage(convId, 'assistant', streamedContent || 'I can help you create a campaign.');
-      }
+// Defer saving assistant message until after tool-call handling to include results
+
 
       // Handle tool calls
       const toolCallsArray = Array.from(accumulatedToolCalls.values());
@@ -198,12 +197,14 @@ const ConversationView = () => {
                   .eq('id', convId);
               }
 
-              toast({
-                title: "Campaign created!",
-                description: `"${config.name}" has been created successfully.`,
-              });
+finalAssistantContent = `Created campaign "${config.name}".`;
 
-              setTimeout(() => navigate(`/campaigns/${campaign.id}`), 2000);
+toast({
+  title: "Campaign created!",
+  description: `"${config.name}" has been created successfully.`,
+});
+
+setTimeout(() => navigate(`/campaigns/${campaign.id}`), 2000);
             } catch (error: any) {
               console.error('Error creating campaign:', error);
               toast({
@@ -240,18 +241,58 @@ const ConversationView = () => {
                 workflowData.id = workflow.id;
               }
               
-              setMessages(prev => {
-                const updated = [...prev];
-                updated[assistantMessageIndex] = {
-                  ...updated[assistantMessageIndex],
-                  metadata: {
-                    type: 'workflow',
-                    workflowId: workflow?.id,
-                    workflowData
-                  }
-                };
-                return updated;
-              });
+setMessages(prev => {
+  const updated = [...prev];
+  updated[assistantMessageIndex] = {
+    ...updated[assistantMessageIndex],
+    metadata: {
+      type: 'workflow',
+      workflowId: workflow?.id,
+      workflowData
+    }
+  };
+  return updated;
+});
+
+// Auto-create a campaign from the workflow so "create it" actually creates it
+try {
+  const { data: campaign, error: campaignError } = await supabase
+    .from('campaigns')
+    .insert({
+      user_id: user.id,
+      name: workflowData.name,
+      target_criteria: workflowData.target_criteria,
+      tone: workflowData.tone || 'casual',
+      goal: workflowData.goal,
+      custom_prompt: workflowData.instructions,
+      frequency_config: workflowData.schedule || { frequency: 'daily', time: '09:00', batch_size: 25 },
+      status: 'draft'
+    })
+    .select()
+    .single();
+
+  if (campaignError) {
+    console.error('Error creating campaign from workflow:', campaignError);
+  } else {
+    if (convId) {
+      await supabase
+        .from('campaign_conversations')
+        .update({ campaign_id: campaign.id })
+        .eq('id', convId);
+    }
+
+    finalAssistantContent = `Created campaign "${workflowData.name}".`;
+
+    toast({
+      title: 'Campaign created!',
+      description: `"${workflowData.name}" has been created from the workflow.`,
+    });
+
+    setTimeout(() => navigate(`/campaigns/${campaign.id}`), 2000);
+  }
+} catch (e) {
+  console.error('Auto-create campaign error:', e);
+}
             } catch (error) {
               console.error('Error parsing workflow:', error);
             }
@@ -283,6 +324,12 @@ const ConversationView = () => {
             }
           }
         }
+      }
+
+      // Persist assistant message after processing tool calls
+      if (convId) {
+        const contentToSave = finalAssistantContent || streamedContent || 'I can help you create a campaign.';
+        await saveMessage(convId, 'assistant', contentToSave);
       }
 
     } catch (error: any) {
