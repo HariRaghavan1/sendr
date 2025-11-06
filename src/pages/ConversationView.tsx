@@ -9,6 +9,7 @@ import { Send, Sparkles, Loader2 } from "lucide-react";
 import { WorkflowCard } from "@/components/WorkflowCard";
 import { ExecutionMonitor } from "@/components/ExecutionMonitor";
 import { TemplateCard } from "@/components/TemplateCard";
+import { GmailConnectCard } from "@/components/GmailConnectCard";
 
 const ConversationView = () => {
   const { conversationId } = useParams();
@@ -710,6 +711,28 @@ try {
                 variant: "destructive",
               });
             }
+          } else if (toolCall.function?.name === 'connect_gmail') {
+            try {
+              const { reason } = JSON.parse(toolCall.function.arguments);
+              
+              // Add special metadata to show Gmail connection button
+              setMessages(prev => {
+                const updated = [...prev];
+                updated[assistantMessageIndex] = {
+                  ...updated[assistantMessageIndex],
+                  metadata: {
+                    type: 'gmail_connect',
+                    reason
+                  }
+                };
+                return updated;
+              });
+
+              finalAssistantContent = `${reason}\n\nClick the button below to connect your Gmail account:`;
+            } catch (error: any) {
+              console.error('Error handling connect_gmail:', error);
+              finalAssistantContent = 'To send emails, you need to connect your Gmail account. Click the button below to get started.';
+            }
           }
         }
       }
@@ -761,7 +784,16 @@ try {
               key={index}
               className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
-              {message.role === 'assistant' && message.metadata?.type === 'template' ? (
+              {message.role === 'assistant' && message.metadata?.type === 'gmail_connect' ? (
+                <div className="max-w-[90%] space-y-3">
+                  <GmailConnectCard reason={message.metadata.reason} />
+                  {message.content && (
+                    <div className="bg-card border border-border rounded-2xl px-5 py-3.5 shadow-sm">
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p>
+                    </div>
+                  )}
+                </div>
+              ) : message.role === 'assistant' && message.metadata?.type === 'template' ? (
                 <div className="max-w-[90%] space-y-3">
                   <TemplateCard template={message.metadata.templateData} />
                 </div>

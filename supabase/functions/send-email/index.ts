@@ -90,10 +90,9 @@ serve(async (req) => {
       // Provide helpful error messages
       if (composioResponse.status === 401) {
         throw new Error('Composio authentication failed. Please check your API key in Settings.');
-      } else if (composioResponse.status === 403) {
-        throw new Error('Gmail not connected. Visit app.composio.dev → Connections → Add Gmail → Use Entity ID: ' + user.id);
-      } else if (composioResponse.status === 404) {
-        throw new Error('Gmail connection not found. Visit app.composio.dev and connect Gmail with Entity ID: ' + user.id);
+      } else if (composioResponse.status === 403 || composioResponse.status === 404) {
+        // Gmail not connected - this should trigger connect_gmail in chat
+        throw new Error('GMAIL_NOT_CONNECTED: Please connect your Gmail account to send emails.');
       } else if (composioResponse.status === 429) {
         throw new Error('Rate limit exceeded. Please wait and try again.');
       }

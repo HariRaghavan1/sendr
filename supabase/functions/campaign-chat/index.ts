@@ -170,6 +170,33 @@ Clado will automatically:
 If user asks about prospects without emails, suggest:
 "I'll enable email enrichment through Clado - this costs 4 credits per email found but significantly improves deliverability."
 
+GMAIL CONNECTION:
+When users want to send emails (not dry run), check if Gmail is connected:
+- If not connected or authentication fails, call connect_gmail tool
+- This will show a button for them to authorize their Gmail account
+- After connection, they can proceed with sending
+
+Examples:
+- User: "Send test emails to 5 prospects"
+  → If Gmail not connected: call connect_gmail with reason "To send test emails to 5 prospects"
+  → Show button: "Connect Gmail to Send Emails"
+  
+- User encounters send error
+  → call connect_gmail with reason "Email sending failed - please reconnect Gmail"
+
+GMAIL CONNECTION DETECTION:
+Before running tests with actual email sending (skip_sending=false), you should:
+1. Check conversation history for "Gmail Connected" confirmation
+2. If not found, call connect_gmail tool BEFORE calling run_test
+3. If send attempt fails with GMAIL_NOT_CONNECTED error, call connect_gmail again
+
+Example flow:
+User: "Run test for 5 prospects and send emails"
+→ Check if Gmail connected in history
+→ If not: call connect_gmail with reason "To send test emails to 5 prospects"
+→ Wait for user to connect (they'll say "connected" or "done")
+→ Then call run_test with skip_sending=false
+
 WORKFLOW:
 1. If user provides target audience, ask about their goal
 2. Once you have target + goal, CREATE immediately using the appropriate tool
@@ -535,6 +562,23 @@ Be direct and action-oriented. Don't ask unnecessary questions.`
                   }
                 },
                 required: ["workflow_id", "updates"]
+              }
+            }
+          },
+          {
+            type: "function",
+            function: {
+              name: "connect_gmail",
+              description: "Prompt user to connect their Gmail account via Composio. Use this when user wants to send emails but hasn't connected Gmail yet, or when they encounter authentication errors.",
+              parameters: {
+                type: "object",
+                properties: {
+                  reason: {
+                    type: "string",
+                    description: "Why Gmail connection is needed (e.g., 'To send test emails', 'Email sending failed - please reconnect')"
+                  }
+                },
+                required: ["reason"]
               }
             }
           }

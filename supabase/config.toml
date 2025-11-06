@@ -33,3 +33,6 @@ verify_jwt = true
 
 [functions.execute-workflow]
 verify_jwt = true
+
+[functions.composio-auth]
+verify_jwt = true
