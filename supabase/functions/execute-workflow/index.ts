@@ -506,6 +506,17 @@ serve(async (req) => {
     // Log to execution log so user can see in UI
     const configKeys = workflow.workflow_config ? Object.keys(workflow.workflow_config).join(', ') : 'NONE';
     await updateExecutionLog(supabase, execution_id, `🔍 Workflow config keys: ${configKeys}`);
+    
+    // CRITICAL: Log template status IMMEDIATELY
+    const templateInConfig = workflow.workflow_config?.email_template;
+    const templateBody = templateInConfig?.example_email?.body;
+    if (templateBody && templateBody.trim()) {
+      await updateExecutionLog(supabase, execution_id, `✅✅✅ TEMPLATE FOUND IN WORKFLOW: "${workflow.name}" has a template (${templateBody.length} chars)`);
+      await updateExecutionLog(supabase, execution_id, `📧 Template preview: "${templateBody.substring(0, 100)}..."`);
+    } else {
+      await updateExecutionLog(supabase, execution_id, `⚠️⚠️⚠️ NO TEMPLATE IN WORKFLOW: "${workflow.name}" does not have a template`);
+      await updateExecutionLog(supabase, execution_id, `💡 TIP: Provide your email template in the conversation BEFORE running a test. The AI will save it to this workflow.`);
+    }
 
     const config = workflow.workflow_config || {};
     const targetCriteria = config.target_criteria || {};
@@ -555,102 +566,22 @@ serve(async (req) => {
     console.log('📋 Workflow config:', JSON.stringify(config));
     console.log('🎯 Target criteria:', JSON.stringify(targetCriteria));
     
-    // CRITICAL: Validate template is properly configured
-    const hasValidTemplate = emailTemplate && 
-                             emailTemplate.type === 'example' && 
-                             emailTemplate.example_email && 
-                             emailTemplate.example_email.body &&
-                             emailTemplate.example_email.body.trim() !== '';
+    // Simple template check - match original's pattern
+    const hasTemplate = emailTemplate?.example_email?.body && emailTemplate.example_email.body.trim().length > 0;
     
-    // EXTENSIVE TEMPLATE DEBUGGING
-    console.log('\n🔍 TEMPLATE STATUS CHECK:');
-    console.log('─────────────────────────────────────────────────────────');
-    console.log(`  ✅ emailTemplate exists: ${!!emailTemplate}`);
-    if (emailTemplate) {
-      console.log(`  ✅ emailTemplate.type: ${emailTemplate.type}`);
-      console.log(`  ✅ emailTemplate.example_email exists: ${!!emailTemplate.example_email}`);
-      console.log(`  ✅ emailTemplate.example_email.body exists: ${!!emailTemplate.example_email?.body}`);
-      console.log(`  ✅ emailTemplate.example_email.body length: ${emailTemplate.example_email?.body?.length || 0}`);
-      console.log(`  ✅ emailTemplate.example_email.body trimmed length: ${emailTemplate.example_email?.body?.trim().length || 0}`);
-      console.log(`  ✅ hasValidTemplate: ${hasValidTemplate}`);
-      console.log(`  📧 Template preview (first 200 chars):`);
-      console.log(`     "${emailTemplate.example_email?.body?.substring(0, 200) || 'N/A'}..."`);
-      console.log(`  📝 Template instructions: ${emailTemplate.instructions || 'none'}`);
-      console.log(`  📌 Template structure exists: ${!!emailTemplate.template_structure}`);
-    } else {
-      console.log(`  ❌ NO TEMPLATE PROVIDED - will use AI generation`);
-    }
-    console.log('─────────────────────────────────────────────────────────\n');
-    
-    if (emailTemplate) {
-      if (!hasValidTemplate) {
-        console.error('⚠️⚠️⚠️ TEMPLATE EXISTS BUT IS INVALID ⚠️⚠️⚠️');
-        console.error('   Reason: Template missing required fields (type, example_email, or body)');
-        console.error('   Action: Will use AI generation instead\n');
-        await updateExecutionLog(
-          supabase,
-          execution_id,
-          `⚠️ Template found but invalid - missing required fields. Using AI generation.`
-        );
-      } else {
-        console.log('✅✅✅ VALID TEMPLATE FOUND ✅✅✅');
-        console.log('   Template will be used for ALL prospects (including fallback contacts)');
-        console.log('   AI generation will be SKIPPED - template will be used directly\n');
-        await updateExecutionLog(
-          supabase,
-          execution_id,
-          `✅✅✅ TEMPLATE MODE: Custom template found and validated. Template will be used for ALL emails (AI generation skipped).`
-        );
-      }
-    } else {
-      console.log('ℹ️  No custom template - will use AI generation with default template structure\n');
+    if (hasTemplate) {
+      console.log('✅ Template found - will use template for all emails');
       await updateExecutionLog(
         supabase,
         execution_id,
-        `ℹ️ AI MODE: No custom template found in workflow. Using AI generation with default template.`
-      );
-    }
-    
-    // CRITICAL: Store template check result at workflow level for later use
-    // This ensures template detection happens once and is reused throughout
-    // MULTIPLE CHECKS to ensure we find the template
-    const workflowTemplateBody = emailTemplate?.example_email?.body || 
-                                 (emailTemplate?.example_email && typeof emailTemplate.example_email === 'object' && 'body' in emailTemplate.example_email ? emailTemplate.example_email.body : null);
-    const workflowTemplateBodyTrimmed = workflowTemplateBody?.trim() || '';
-    const workflowHasTemplate = workflowTemplateBodyTrimmed.length > 0;
-    
-    // CRITICAL DEBUG: Log to execution log so user can see
-    await updateExecutionLog(supabase, execution_id, `🔍 TEMPLATE DETECTION DEBUG:`);
-    await updateExecutionLog(supabase, execution_id, `   emailTemplate exists: ${!!emailTemplate}`);
-    if (emailTemplate) {
-      await updateExecutionLog(supabase, execution_id, `   emailTemplate.type: ${emailTemplate.type || 'MISSING'}`);
-      await updateExecutionLog(supabase, execution_id, `   emailTemplate.example_email exists: ${!!emailTemplate.example_email}`);
-      if (emailTemplate.example_email) {
-        await updateExecutionLog(supabase, execution_id, `   emailTemplate.example_email.body exists: ${!!emailTemplate.example_email.body}`);
-        await updateExecutionLog(supabase, execution_id, `   emailTemplate.example_email.body length: ${emailTemplate.example_email.body?.length || 0}`);
-        await updateExecutionLog(supabase, execution_id, `   emailTemplate.example_email.body preview: "${(emailTemplate.example_email.body || '').substring(0, 100)}..."`);
-      }
-    }
-    await updateExecutionLog(supabase, execution_id, `   workflowTemplateBody: ${workflowTemplateBody ? `YES (${workflowTemplateBody.length} chars)` : 'NULL'}`);
-    await updateExecutionLog(supabase, execution_id, `   workflowHasTemplate: ${workflowHasTemplate}`);
-    
-    // Log template status IMMEDIATELY so user can see it early
-    if (workflowHasTemplate) {
-      await updateExecutionLog(
-        supabase,
-        execution_id,
-        `✅✅✅ WORKFLOW TEMPLATE DETECTED: Template will be used for ALL email generation (AI will be SKIPPED)`
-      );
-      await updateExecutionLog(
-        supabase,
-        execution_id,
-        `📧 Template preview: "${workflowTemplateBody.substring(0, 150)}..."`
+        `✅ Template mode: Using custom template for all emails`
       );
     } else {
+      console.log('ℹ️ No template - will use AI generation');
       await updateExecutionLog(
         supabase,
         execution_id,
-        `❌❌❌ NO TEMPLATE IN WORKFLOW: Will use AI generation for all emails`
+        `ℹ️ AI mode: No template found, using AI generation`
       );
     }
     
@@ -802,39 +733,31 @@ serve(async (req) => {
     let prospects: any[] = [];
 
     try {
-      // Build search query from target criteria with fallback strategies
-      const buildQuery = (criteria: any, fallbackLevel: number = 0): string => {
+      // Build search query from target criteria - match original's simple logic
+      const buildQuery = (criteria: any): string => {
         const queryParts: string[] = [];
-        
-        // Fallback levels:
-        // 0: Full criteria (most specific)
-        // 1: Job titles only (broader)
-        // 2: Just job titles without location/company (broadest)
-        
-        if (fallbackLevel === 0) {
-          // Original query with all criteria
-          if (criteria.job_titles && Array.isArray(criteria.job_titles) && criteria.job_titles.length > 0) {
-            queryParts.push(criteria.job_titles.join(' or '));
-          }
-          
-          if (criteria.industry) {
-            queryParts.push(`in ${criteria.industry} industry`);
-          }
-          
-          if (criteria.location) {
-            queryParts.push(`located in ${criteria.location}`);
-          }
-          
-          if (criteria.company_size) {
-            queryParts.push(`at companies with ${criteria.company_size}`);
-          }
-        } else if (fallbackLevel === 1) {
-          // Fallback: Just job titles
-          if (criteria.job_titles && Array.isArray(criteria.job_titles) && criteria.job_titles.length > 0) {
-            queryParts.push(criteria.job_titles.join(' or '));
+
+        if (criteria.job_titles) {
+          const titles = Array.isArray(criteria.job_titles)
+            ? criteria.job_titles.join(' or ')
+            : criteria.job_titles;
+          if (titles && titles.trim()) {
+            queryParts.push(titles);
           }
         }
         
+        if (criteria.industry) {
+          queryParts.push(`in ${criteria.industry}`);
+        }
+        
+        if (criteria.location) {
+          queryParts.push(`located in ${criteria.location}`);
+        }
+        
+        if (criteria.company_size) {
+          queryParts.push(`at ${criteria.company_size} companies`);
+        }
+
         return queryParts.join(' ') || 'professionals';
       };
 
@@ -878,73 +801,87 @@ serve(async (req) => {
         `[2/3] 🚀 Launching ${queryStrategies.length} parallel Clado searches...`
       );
 
+      // Helper function to try Clado search with timeout (match original)
+      const trySearchWithTimeout = async (query: string, description: string, timeoutMs: number = 30000) => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+        try {
+          await updateExecutionLog(supabase, execution_id, `[2/3] 🔍 Query "${description}": ${query}`);
+          console.log(`Launching query: ${description}`);
+
+          const cladoApiUrl = new URL('https://search.clado.ai/api/search');
+          cladoApiUrl.searchParams.append('query', query);
+          cladoApiUrl.searchParams.append('limit', limit.toString());
+          cladoApiUrl.searchParams.append('advanced_filtering', 'true');
+
+          const startTime = Date.now();
+          const cladoResponse = await fetch(cladoApiUrl.toString(), {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${cladoApiKey}`,
+            },
+            signal: controller.signal,
+          });
+
+          clearTimeout(timeout);
+          const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+
+          if (!cladoResponse.ok) {
+            const errorText = await cladoResponse.text();
+            console.error(`Clado error for ${description}:`, errorText);
+            await updateExecutionLog(supabase, execution_id, `[2/3] ❌ Query "${description}" failed (${duration}s)`);
+            return [];
+          }
+
+          const cladoData = await cladoResponse.json();
+          const results = (cladoData.results || []).map((result: any) => {
+            const profile = result.profile || {};
+            const experience = result.experience?.[0] || {};
+
+            return {
+              id: profile.id || crypto.randomUUID(),
+              name: profile.name || 'Unknown',
+              email: '',
+              title: experience.title || profile.headline || '',
+              company: experience.company_name || '',
+              linkedin_url: profile.linkedin_url || '',
+            };
+          });
+
+          if (results.length > 0) {
+            await updateExecutionLog(
+              supabase, 
+              execution_id, 
+              `[2/3] ✅ Query "${description}": ${results.length} prospects (${duration}s)`
+            );
+          } else {
+            await updateExecutionLog(
+              supabase, 
+              execution_id, 
+              `[2/3] ⚠️ Query "${description}": 0 prospects (${duration}s)`
+            );
+          }
+
+          console.log(`Query ${description} completed: ${results.length} prospects in ${duration}s`);
+          return results;
+
+        } catch (error: any) {
+          clearTimeout(timeout);
+          if (error.name === 'AbortError') {
+            console.error(`Query ${description} timed out`);
+            await updateExecutionLog(supabase, execution_id, `[2/3] ⏱️ Query "${description}" timed out`);
+          } else {
+            console.error(`Query ${description} failed:`, error);
+          }
+          return [];
+        }
+      };
+
       const searchPromises = queryStrategies.map(strategy => {
-        // Validate criteria - must have at least job_titles to be useful
-        const hasValidCriteria = strategy.criteria && 
-                                 strategy.criteria.job_titles && 
-                                 Array.isArray(strategy.criteria.job_titles) &&
-                                 strategy.criteria.job_titles.length > 0 &&
-                                 strategy.criteria.job_titles.some((title: string) => title && title.trim().length > 0);
-        
-        return hasValidCriteria
-          ? (async () => {
-              try {
-                // Clean and validate criteria before searching
-                const cleanCriteria = {
-                  job_titles: strategy.criteria.job_titles
-                    .filter((title: string) => title && title.trim().length > 0)
-                    .map((title: string) => title.trim()),
-                  ...(strategy.criteria.industry && strategy.criteria.industry.trim() ? { industry: strategy.criteria.industry.trim() } : {}),
-                  ...(strategy.criteria.location && strategy.criteria.location.trim() ? { location: strategy.criteria.location.trim() } : {}),
-                  ...(strategy.criteria.company_size ? { company_size: strategy.criteria.company_size } : {}),
-                };
-                
-                const query = buildQuery(cleanCriteria);
-                console.log(`🔍 Query "${strategy.description}": ${query}`);
-                console.log(`🔍 Criteria for "${strategy.description}":`, JSON.stringify(cleanCriteria));
-                const startTime = Date.now();
-                
-                const results = await searchCladoProspects(
-                  cleanCriteria,
-                  cladoApiKey,
-                  {
-                    limit: Math.ceil(limit * 1.5), // Get more than needed for deduplication
-                    advanced_filtering: true,
-                    initiateDeepResearch: true,
-                    enrichContacts: shouldEnrichEmails,
-                    enrichProfiles: true,
-                    useScrapeForProfiles: false,
-                  }
-                );
-                
-                const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-                const enrichedCount = results.filter((p: any) => p.email && p.email.trim() !== '').length;
-                
-                if (results.length === 0) {
-                  await updateExecutionLog(supabase, execution_id, `[2/3] ⚠️ Query "${strategy.description}": 0 prospects (${duration}s)`);
-                } else {
-                  const deepResearchJobIds = [...new Set(results.map((p: any) => p.deep_research_job_id).filter(Boolean))];
-                  const deepResearchMsg = deepResearchJobIds.length > 0 
-                    ? ` (Deep research job: ${deepResearchJobIds[0]})` 
-                    : '';
-                  await updateExecutionLog(
-                    supabase, 
-                    execution_id, 
-                    `[2/3] ✅ Query "${strategy.description}": ${results.length} prospects, ${enrichedCount} enriched${deepResearchMsg} (${duration}s)`
-                  );
-                }
-                
-                return results;
-              } catch (error: any) {
-                console.error(`Search error for "${strategy.description}":`, error);
-                await updateExecutionLog(
-                  supabase, 
-                  execution_id, 
-                  `[2/3] ❌ Query "${strategy.description}" failed: ${error.message || error}`
-                );
-                return [];
-              }
-            })()
+        const query = buildQuery(strategy.criteria);
+        return query && query !== 'professionals' 
+          ? trySearchWithTimeout(query, strategy.description)
           : Promise.resolve([]);
       });
 
@@ -979,42 +916,6 @@ serve(async (req) => {
       
       const searchDuration = ((Date.now() - searchStartTime) / 1000).toFixed(1);
       
-      // If ALL searches failed, try a fallback broad search
-      if (prospects.length === 0 && successfulSearches.length === 0 && targetCriteria.job_titles && targetCriteria.job_titles.length > 0) {
-        await updateExecutionLog(
-          supabase, 
-          execution_id, 
-          `[2/3] ⚠️ All searches failed, trying fallback broad search...`
-        );
-        
-        try {
-          // Fallback: Very broad search with just job titles
-          const fallbackCriteria = { job_titles: targetCriteria.job_titles };
-          const fallbackResults = await searchCladoProspects(
-            fallbackCriteria,
-            cladoApiKey,
-            {
-              limit: limit * 2, // Get more for fallback
-              advanced_filtering: false, // Disable advanced filtering for broader results
-              initiateDeepResearch: true,
-              enrichContacts: shouldEnrichEmails,
-              enrichProfiles: true,
-              useScrapeForProfiles: false,
-            }
-          );
-          
-          if (fallbackResults.length > 0) {
-            prospects = fallbackResults.slice(0, limit);
-            await updateExecutionLog(
-              supabase, 
-              execution_id, 
-              `[2/3] ✅ Fallback search: ${prospects.length} prospects found`
-            );
-          }
-        } catch (fallbackError: any) {
-          console.error('Fallback search also failed:', fallbackError);
-        }
-      }
       
       if (prospects.length > 0) {
         await updateExecutionLog(
@@ -1040,77 +941,103 @@ serve(async (req) => {
           }));
         });
       } else {
-        // Final fallback: Try an even broader search if we have job titles
-        if (targetCriteria.job_titles && targetCriteria.job_titles.length > 0) {
+        await updateExecutionLog(
+          supabase, 
+          execution_id, 
+          `[2/3] ⚠️ No prospects found after ${searchDuration}s`
+        );
+        
+        // Fallback: Try ultra-broad search with just job titles (most important criteria)
+        if (targetCriteria.job_titles && Array.isArray(targetCriteria.job_titles) && targetCriteria.job_titles.length > 0) {
+          const fallbackQuery = targetCriteria.job_titles.join(' or ');
           await updateExecutionLog(
-            supabase, 
-            execution_id, 
+            supabase,
+            execution_id,
             `[2/3] ⚠️ No prospects found, trying ultra-broad fallback search...`
+          );
+          await updateExecutionLog(
+            supabase,
+            execution_id,
+            `[2/3] 🔍 Ultra-broad fallback query: "${fallbackQuery}"`
           );
           
           try {
-            // Ultra-broad: Just the first job title, no other filters
-            const ultraBroadCriteria = { job_titles: [targetCriteria.job_titles[0]] };
-            const ultraBroadResults = await searchCladoProspects(
-              ultraBroadCriteria,
-              cladoApiKey,
-              {
-                limit: limit * 3,
-                advanced_filtering: false,
-                initiateDeepResearch: true,
-                enrichContacts: shouldEnrichEmails,
-                enrichProfiles: false, // Skip profile enrichment for speed
-                useScrapeForProfiles: false,
-              }
-            );
-            
-            if (ultraBroadResults.length > 0) {
-              prospects = ultraBroadResults.slice(0, limit);
+            const fallbackResults = await trySearchWithTimeout(fallbackQuery, 'Ultra-broad fallback', 30000);
+            if (fallbackResults.length > 0) {
+              prospects = fallbackResults.slice(0, limit);
               await updateExecutionLog(
-                supabase, 
-                execution_id, 
+                supabase,
+                execution_id,
                 `[2/3] ✅ Ultra-broad fallback: ${prospects.length} prospects found`
               );
             } else {
               await updateExecutionLog(
-                supabase, 
-                execution_id, 
-                `[2/3] ⚠️ Clado: No prospects found even with ultra-broad search. Please try:\n1. Broader job titles\n2. Remove location/industry filters\n3. Check your Clado API credits`
+                supabase,
+                execution_id,
+                `[2/3] ⚠️ Ultra-broad fallback also returned 0 prospects`
               );
             }
-          } catch (ultraBroadError: any) {
-            console.error('Ultra-broad fallback failed:', ultraBroadError);
+          } catch (fallbackError) {
+            console.error('Ultra-broad fallback search failed:', fallbackError);
             await updateExecutionLog(
-              supabase, 
-              execution_id, 
-              `[2/3] ⚠️ Clado: No prospects found matching criteria. Try broadening your search or check API credits.`
+              supabase,
+              execution_id,
+              `[2/3] ❌ Ultra-broad fallback search failed`
             );
           }
         } else {
           await updateExecutionLog(
-            supabase, 
-            execution_id, 
-            `[2/3] ⚠️ Clado: No prospects found matching criteria. Try broadening your search.`
+            supabase,
+            execution_id,
+            `[2/3] ⚠️ Cannot run fallback: No job titles specified in target criteria`
           );
         }
       }
 
-      // Log enrichment summary
-      if (prospects.length > 0) {
-        const enrichedCount = prospects.filter((p: any) => p.email && p.email.trim() !== '').length;
-        const emailCount = prospects.filter((p: any) => p.email && p.email.trim() !== '').length;
-        const phoneCount = prospects.filter((p: any) => p.phone && p.phone.trim() !== '').length;
-        const profileEnrichedCount = prospects.filter((p: any) => p.profile_data).length;
-        const deepResearchJobIds = [...new Set(prospects.map((p: any) => p.deep_research_job_id).filter(Boolean))];
-        
-        let enrichmentMsg = `[2.5/3] ✅ Enrichment complete: ${enrichedCount}/${prospects.length} contacts enriched (${emailCount} emails, ${phoneCount} phones)`;
-        if (profileEnrichedCount > 0) {
-          enrichmentMsg += `, ${profileEnrichedCount} profiles enriched for personalization`;
+      // Email enrichment step (if enabled) - match original pattern
+      if (shouldEnrichEmails && prospects.length > 0) {
+        await updateExecutionLog(supabase, execution_id, `[2.5/3] 📧 Enriching ${prospects.length} prospects with emails...`);
+        const enrichStartTime = Date.now();
+        let enrichedCount = 0;
+
+        for (let i = 0; i < prospects.length; i++) {
+          const prospect = prospects[i];
+          
+          if (prospect.linkedin_url && !prospect.email) {
+            try {
+              const enrichUrl = `https://search.clado.ai/api/enrich/contacts?linkedin_url=${encodeURIComponent(prospect.linkedin_url)}&email_enrichment=true`;
+              
+              const enrichResponse = await fetch(enrichUrl, {
+                method: 'GET',
+                headers: {
+                  'Authorization': `Bearer ${cladoApiKey}`,
+                  'Content-Type': 'application/json'
+                }
+              });
+
+              if (enrichResponse.ok) {
+                const enrichData = await enrichResponse.json();
+                const email = enrichData.data?.work_email || enrichData.data?.personal_email || 
+                             (enrichData.data?.[0]?.contacts?.find((c: any) => c.type === 'email')?.value);
+                
+                if (email) {
+                  prospects[i].email = email;
+                  enrichedCount++;
+                  console.log(`Enriched email for ${prospect.name}: ${email}`);
+                }
+              }
+            } catch (error) {
+              console.error(`Email enrichment failed for ${prospect.name}:`, error);
+            }
+          }
         }
-        if (Array.isArray(deepResearchJobIds) && deepResearchJobIds.length > 0) {
-          enrichmentMsg += ` | Deep research jobs: ${deepResearchJobIds.slice(0, 3).join(', ')}${deepResearchJobIds.length > 3 ? '...' : ''}`;
-        }
-        await updateExecutionLog(supabase, execution_id, enrichmentMsg);
+
+        const enrichDuration = ((Date.now() - enrichStartTime) / 1000).toFixed(1);
+        await updateExecutionLog(
+          supabase, 
+          execution_id, 
+          `[2.5/3] ✅ Email enrichment complete: ${enrichedCount}/${prospects.length} emails found (${enrichDuration}s)`
+        );
       }
 
       console.log(`Parallel search completed: ${prospects.length} prospects in ${searchDuration}s`);
@@ -1136,44 +1063,6 @@ serve(async (req) => {
         JSON.stringify({ execution_id, message: errorMsg }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
-    }
-
-    // CRITICAL: Use the workflow-level template check from above
-    // This ensures we use the same template detection logic
-    const templateCheckBody = workflowTemplateBody; // Use the one we checked earlier
-    const templateExists = workflowHasTemplate; // Use the flag we set earlier
-    
-    // CRITICAL DEBUG: Log what we actually have
-    console.log('\n🔍 WORKFLOW-LEVEL TEMPLATE CHECK:');
-    console.log(`   workflowTemplateBody: ${workflowTemplateBody ? `YES (${workflowTemplateBody.length} chars)` : 'NULL'}`);
-    console.log(`   workflowHasTemplate: ${workflowHasTemplate}`);
-    console.log(`   emailTemplate: ${emailTemplate ? 'EXISTS' : 'NULL'}`);
-    if (emailTemplate) {
-      console.log(`   emailTemplate.type: ${emailTemplate.type}`);
-      console.log(`   emailTemplate.example_email: ${emailTemplate.example_email ? 'EXISTS' : 'NULL'}`);
-      if (emailTemplate.example_email) {
-        console.log(`   emailTemplate.example_email.body: ${emailTemplate.example_email.body ? `YES (${emailTemplate.example_email.body.length} chars)` : 'NULL'}`);
-        console.log(`   emailTemplate.example_email.body trimmed: ${emailTemplate.example_email.body?.trim() ? `YES (${emailTemplate.example_email.body.trim().length} chars)` : 'EMPTY'}`);
-      }
-    }
-    console.log(`   templateCheckBody: ${templateCheckBody ? `YES (${templateCheckBody.length} chars)` : 'NULL'}`);
-    console.log(`   templateExists: ${templateExists}`);
-    
-    if (templateExists && templateCheckBody) {
-      await updateExecutionLog(supabase, execution_id, `[3/3] ✅✅✅ TEMPLATE MODE: Template found! Will use template for ALL ${prospects.length} prospects (AI generation will be SKIPPED)`);
-      await updateExecutionLog(supabase, execution_id, `[3/3] 📧 Template preview: "${templateCheckBody.substring(0, 100)}..."`);
-    } else {
-      await updateExecutionLog(supabase, execution_id, `[3/3] ❌❌❌ AI MODE: NO TEMPLATE FOUND - Will use AI generation for ${prospects.length} prospects`);
-      await updateExecutionLog(supabase, execution_id, `[3/3] 🔍 DEBUG: workflowTemplateBody=${!!workflowTemplateBody}, workflowHasTemplate=${workflowHasTemplate}, emailTemplate=${!!emailTemplate}`);
-      if (!emailTemplate) {
-        await updateExecutionLog(supabase, execution_id, `[3/3] ⚠️ Reason: emailTemplate is NULL - no template in workflow_config`);
-      } else if (!emailTemplate.example_email) {
-        await updateExecutionLog(supabase, execution_id, `[3/3] ⚠️ Reason: emailTemplate.example_email is missing`);
-      } else if (!emailTemplate.example_email.body) {
-        await updateExecutionLog(supabase, execution_id, `[3/3] ⚠️ Reason: emailTemplate.example_email.body is missing or empty`);
-      } else {
-        await updateExecutionLog(supabase, execution_id, `[3/3] ⚠️ Reason: Template body exists but workflowHasTemplate=false. Body length: ${emailTemplate.example_email.body?.length || 0}`);
-      }
     }
 
     await updateExecutionLog(supabase, execution_id, `[3/3] 📧 Starting email generation for ${prospects.length} prospects...`);
@@ -1207,28 +1096,32 @@ serve(async (req) => {
         let parsedBody = '';
         const senderName = 'Hari'; // Default sender name
         
-        // SIMPLE LOGIC: Use template if it exists, otherwise generate
-        // Check multiple sources to ensure we find the template
-        const templateFromEmailTemplate = emailTemplate?.example_email?.body?.trim();
-        const templateFromCheckBody = templateCheckBody?.trim();
-        const templateBody = templateFromEmailTemplate || templateFromCheckBody || null;
+        // SIMPLE LOGIC: Use template if it exists (match original's pattern)
+        const emailTemplateBody = emailTemplate?.example_email?.body;
+        const emailTemplateSubject = emailTemplate?.example_email?.subject;
         
-        // CRITICAL: Log to execution log so user can see what's happening
-        await updateExecutionLog(supabase, execution_id, `🔍 TEMPLATE CHECK FOR ${prospect.name}:`);
-        await updateExecutionLog(supabase, execution_id, `   emailTemplate exists: ${!!emailTemplate}`);
-        await updateExecutionLog(supabase, execution_id, `   emailTemplate.example_email.body: ${templateFromEmailTemplate ? `YES (${templateFromEmailTemplate.length} chars)` : 'NO'}`);
-        await updateExecutionLog(supabase, execution_id, `   templateCheckBody: ${templateFromCheckBody ? `YES (${templateFromCheckBody.length} chars)` : 'NO'}`);
-        await updateExecutionLog(supabase, execution_id, `   templateBody (final): ${templateBody ? `YES (${templateBody.length} chars)` : 'NO'}`);
-        
-        if (templateBody) {
-          // Use template - simple and direct
-          parsedBody = templateBody;
-          parsedSubject = emailTemplate?.example_email?.subject 
-            ? replacePlaceholders(emailTemplate.example_email.subject, prospect, senderName)
+        if (emailTemplateBody && emailTemplateBody.trim()) {
+          // Use template with basic personalization (match original's simple replacement)
+          await updateExecutionLog(supabase, execution_id, `Using template for ${prospect.name}...`);
+          
+          // Simple replacement like original, but keep {Name} support
+          parsedSubject = emailTemplateSubject
+            ? emailTemplateSubject
+                .replace(/\{name\}/gi, prospect.name || '')
+                .replace(/\{Name\}/g, prospect.name?.split(' ').slice(-1)[0] || '')
+                .replace(/\{company\}/gi, prospect.company || '')
+                .replace(/\{title\}/gi, prospect.title || '')
             : 'Quick question';
           
-          await updateExecutionLog(supabase, execution_id, `✅✅✅ USING TEMPLATE for ${prospect.name} - parsedBody set (${parsedBody.length} chars)`);
-          await updateExecutionLog(supabase, execution_id, `📧 Template preview: "${parsedBody.substring(0, 150)}..."`);
+          parsedBody = emailTemplateBody
+            .replace(/\{name\}/gi, prospect.name || '')
+            .replace(/\{Name\}/g, prospect.name?.split(' ').slice(-1)[0] || '')
+            .replace(/\{company\}/gi, prospect.company || '')
+            .replace(/\{title\}/gi, prospect.title || '');
+          
+          // Also support {signature} placeholder
+          parsedBody = parsedBody.replace(/\{signature\}/gi, senderName);
+          parsedSubject = parsedSubject.replace(/\{signature\}/gi, senderName);
         } else {
           // No template - generate with AI
           await updateExecutionLog(supabase, execution_id, `❌❌❌ NO TEMPLATE for ${prospect.name} - using AI generation`);
@@ -1398,7 +1291,7 @@ Return ONLY a JSON object:
         }
 
         // Validate and enforce template structure ONLY if no custom template is provided
-        if (!templateBody) {
+        if (!emailTemplateBody || !emailTemplateBody.trim()) {
           const validation = STANDARD_EMAIL_TEMPLATE.validateStructure(parsedBody);
           
           if (!validation.valid) {
@@ -1439,8 +1332,8 @@ Return ONLY a JSON object:
             }
           }
         } else {
-          // For custom templates, only ensure signature placeholder is present
-          if (templateBody && !parsedBody.includes('{signature}') && !parsedBody.match(/\[Your Name\]|\[your name\]/i)) {
+          // For custom templates, only ensure signature placeholder is present if missing
+          if (!parsedBody.includes('{signature}') && !parsedBody.match(/\[Your Name\]|\[your name\]/i)) {
             const closingMatch = parsedBody.match(/(Best|Regards|Thanks|Thank you|Sincerely|Yours|Cheers)[,\s]*$/i);
             if (closingMatch) {
               parsedBody = parsedBody.replace(closingMatch[0], `${closingMatch[0]}\n{signature}`);
@@ -1450,16 +1343,9 @@ Return ONLY a JSON object:
           }
         }
         
-        // Replace placeholders and clean up
-        // DEBUG: Log before placeholder replacement
-        const wasTemplate = templateBody !== null;
-        const bodyBeforePlaceholders = parsedBody;
-        parsedBody = replacePlaceholders(parsedBody, prospect, senderName);
-        
-        // DEBUG: Log after placeholder replacement
-        if (wasTemplate) {
-          console.log(`   ✅ Template used: body length ${bodyBeforePlaceholders.length} → ${parsedBody.length} after placeholders`);
-          await updateExecutionLog(supabase, execution_id, `✅ Template applied for ${prospect.name}, placeholders replaced`);
+        // Replace placeholders ONLY for AI-generated content (templates already handled above)
+        if (!emailTemplateBody || !emailTemplateBody.trim()) {
+          parsedBody = replacePlaceholders(parsedBody, prospect, senderName);
         }
         
         // COMPREHENSIVE duplicate signature removal - catch ALL variations

@@ -15,20 +15,42 @@ const ConversationView = () => {
   const { conversationId } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { messages, setMessages, createConversation, saveMessage } = useConversation(conversationId);
+  const { messages, setMessages, createConversation, saveMessage, loadConversation } = useConversation(conversationId);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [currentConvId, setCurrentConvId] = useState<string | undefined>(conversationId);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!conversationId && messages.length === 0) {
-      setMessages([{
-        role: 'assistant',
-        content: "Hi! I'll help you create an email outreach campaign. What kind of prospects do you want to reach?"
-      }]);
+    // Only show template prompt for new conversations (no conversationId and no messages)
+    // For existing conversations, messages will be loaded by useConversation hook
+    // Ensure messages array is valid (filter out any undefined/null entries)
+    if (!messages || !Array.isArray(messages)) {
+      // Don't clear messages if we're switching conversations - preserve cache
+      if (!conversationId) {
+        setMessages([]);
+      }
+      return;
     }
-  }, [conversationId]);
+    
+    const validMessages = messages.filter(msg => msg && msg.role && msg.content != null);
+    
+    // Only set initial message for truly new conversations (no ID, no cached messages)
+    if (!conversationId && validMessages.length === 0) {
+      const initialMessage: Message = {
+        role: 'assistant',
+        content: "Hi! I'll help you create an email outreach campaign.\n\n**Who would you like to target?**\n\nPlease describe your target audience (e.g., 'executive directors of reentry nonprofits', 'software engineers at tech companies', etc.)."
+      };
+      setMessages([initialMessage]);
+      
+      // Save initial message to DB immediately when conversation is created
+      // This will happen when user sends first message (conversation gets created)
+    } else if (validMessages.length !== messages.length && validMessages.length > 0) {
+      // Only clean up invalid messages if we have valid ones to keep
+      setMessages(validMessages);
+    }
+    // If switching conversations, keep the loaded messages - don't reset
+  }, [conversationId]); // Removed messages from dependencies to prevent unnecessary resets
 
   useEffect(() => {
     setCurrentConvId(conversationId);
@@ -54,13 +76,19 @@ const ConversationView = () => {
         },
         (payload) => {
           const newMessage = payload.new as any;
+          // Validate message has required fields
+          if (!newMessage || !newMessage.role || !newMessage.content) {
+            console.warn('Invalid message received from real-time:', newMessage);
+            return;
+          }
+          
           setMessages(prev => {
             // Check if message already exists by ID or by content+role+timestamp to prevent duplicates
-            const existsById = newMessage.id && prev.some((m: any) => m.id === newMessage.id);
+            const existsById = newMessage.id && prev.some((m: any) => m && m.id === newMessage.id);
             if (existsById) return prev;
             
             // Also check for content duplicates in recent messages (last 3)
-            const recentMessages = prev.slice(-3);
+            const recentMessages = prev.slice(-3).filter(m => m && m.role && m.content);
             const existsByContent = recentMessages.some((m: any) => 
               m.role === newMessage.role && 
               m.content === newMessage.content
@@ -101,9 +129,34 @@ const ConversationView = () => {
         convId = await createConversation(userMessage);
         setCurrentConvId(convId);
         navigate(`/campaigns/ai-create/${convId}`, { replace: true });
+        
+        // Save the initial assistant message to DB so it persists
+        const initialMessage = messages.find(m => m.role === 'assistant' && m.content.includes('target'));
+        if (initialMessage && !initialMessage.id) {
+          await supabase
+            .from('conversation_messages')
+            .insert({
+              conversation_id: convId,
+              role: 'assistant',
+              content: initialMessage.content
+            });
+        }
       }
 
-      // Save user message to DB first (real-time subscription will add it to UI)
+      // Add user message to UI immediately (before DB save) so it's visible
+      // IMPORTANT: Don't filter out any messages - keep ALL messages including initial assistant message
+      setMessages(prev => {
+        // Only filter out truly invalid messages (null/undefined), but keep all valid ones
+        const validPrev = prev.filter(msg => msg && msg.role && msg.content != null);
+        // Check if message already exists to prevent duplicates
+        const exists = validPrev.some(msg => msg.role === 'user' && msg.content === userMessage);
+        if (exists) return validPrev;
+        
+        // Add new user message - preserve ALL existing messages including initial assistant message
+        return [...validPrev, { role: 'user' as const, content: userMessage }];
+      });
+
+      // Save user message to DB (real-time subscription will update UI if needed)
       if (convId) {
         const { error } = await supabase
           .from('conversation_messages')
@@ -115,12 +168,8 @@ const ConversationView = () => {
         
         if (error) {
           console.error('Error saving user message:', error);
-          // Fallback: add locally if DB save fails
-          setMessages(prev => [...prev, { role: 'user' as const, content: userMessage }]);
+          // User message already added to UI above, so continue
         }
-      } else {
-        // No conversation yet, add locally
-        setMessages(prev => [...prev, { role: 'user' as const, content: userMessage }]);
       }
 
       // Wait a moment for real-time subscription to add the user message
@@ -132,10 +181,18 @@ const ConversationView = () => {
       let currentMessagesForAPI: Message[];
       
       setMessages(prev => {
-        assistantMessageIndex = prev.length;
-        currentMessagesForAPI = prev.length > 0 ? prev : [{ role: 'user' as const, content: userMessage }];
-        // Add placeholder for streaming assistant message
-        return [...prev, { role: 'assistant' as const, content: '' }];
+        // Ensure user message is included (might not be in prev yet if real-time hasn't updated)
+        // IMPORTANT: Keep ALL messages including initial assistant message
+        const validPrev = prev.filter(msg => msg && msg.role && msg.content != null);
+        const hasUserMessage = validPrev.some(msg => msg.role === 'user' && msg.content === userMessage);
+        const messagesWithUser = hasUserMessage ? validPrev : [...validPrev, { role: 'user' as const, content: userMessage }];
+        
+        assistantMessageIndex = messagesWithUser.length;
+        // For API, only send messages with content (exclude empty placeholders)
+        currentMessagesForAPI = messagesWithUser.filter(msg => msg && msg.role && msg.content != null && msg.content !== '');
+        
+        // Add placeholder for streaming assistant message - preserve all existing messages
+        return [...messagesWithUser, { role: 'assistant' as const, content: '' }];
       });
 
       // Stream response from edge function
@@ -157,7 +214,10 @@ const ConversationView = () => {
               'Authorization': `Bearer ${session.data.session?.access_token}`,
             },
             body: JSON.stringify({
-              messages: currentMessagesForAPI.filter(msg => msg && msg.content != null && msg.content !== '')
+              messages: currentMessagesForAPI.map(msg => ({
+                role: msg.role,
+                content: msg.content
+              })).filter(msg => msg && msg.content != null && msg.content !== '')
             }),
           }
         );
@@ -215,11 +275,43 @@ let accumulatedToolCalls: Map<number, any> = new Map();
             if (content) {
               streamedContent += content;
               setMessages(prev => {
+                // Find the assistant placeholder message (empty content, assistant role, at or after assistantMessageIndex)
+                // This ensures we update the correct message even if new messages arrive
                 const updated = [...prev];
-                updated[assistantMessageIndex] = {
-                  role: 'assistant',
-                  content: streamedContent
-                };
+                let targetIndex = -1;
+                
+                // First, try to find message at the expected index
+                if (assistantMessageIndex < updated.length && 
+                    updated[assistantMessageIndex]?.role === 'assistant' && 
+                    (updated[assistantMessageIndex].content === '' || updated[assistantMessageIndex].content === streamedContent.slice(0, updated[assistantMessageIndex].content.length))) {
+                  targetIndex = assistantMessageIndex;
+                } else {
+                  // Fallback: find the last assistant message with empty or matching content
+                  for (let i = updated.length - 1; i >= Math.max(0, assistantMessageIndex - 2); i--) {
+                    if (updated[i]?.role === 'assistant' && 
+                        (updated[i].content === '' || updated[i].content === streamedContent.slice(0, updated[i].content.length))) {
+                      targetIndex = i;
+                      break;
+                    }
+                  }
+                }
+                
+                // If we found a target, update it; otherwise append (shouldn't happen but safe fallback)
+                if (targetIndex >= 0 && targetIndex < updated.length) {
+                  updated[targetIndex] = {
+                    ...updated[targetIndex],
+                    role: 'assistant',
+                    content: streamedContent
+                  };
+                } else {
+                  // Fallback: append if we can't find the placeholder (shouldn't happen normally)
+                  console.warn('Could not find assistant placeholder, appending new message');
+                  updated.push({
+                    role: 'assistant',
+                    content: streamedContent
+                  });
+                }
+                
                 return updated;
               });
             }
@@ -268,38 +360,75 @@ let accumulatedToolCalls: Map<number, any> = new Map();
               const { data: { user } } = await supabase.auth.getUser();
               if (!user) throw new Error('Not authenticated');
 
-              // Create a workflow (needed for the WorkflowCard and test runs)
-              const workflowData = {
-                name: config.name,
-                description: `Campaign: ${config.name}`,
+              // CRITICAL: Check if workflow already exists for this conversation
+              // If it does, update it instead of creating a new one (preserves email_template)
+              let workflow;
+              let existingWorkflow;
+              
+              if (convId) {
+                const { data: existing } = await supabase
+                  .from('workflows')
+                  .select('id, workflow_config')
+                  .eq('conversation_id', convId)
+                  .eq('user_id', user.id)
+                  .order('created_at', { ascending: false })
+                  .limit(1)
+                  .maybeSingle();
+                
+                existingWorkflow = existing;
+              }
+
+              // Build workflow_config - preserve existing config and merge new fields
+              const existingConfig = existingWorkflow?.workflow_config || {};
+              const workflowConfig = {
+                ...existingConfig, // Preserve ALL existing config (including email_template)
                 target_criteria: config.target_criteria,
                 tone: config.tone,
                 goal: config.goal,
-                instructions: config.custom_prompt || '',
-                schedule: { frequency: 'daily', time: '09:00', batch_size: 25 },
-                steps: [
-                  { action: 'find_prospects', description: 'Find prospects matching criteria' },
-                  { action: 'generate_email', description: 'Generate personalized emails' },
-                  { action: 'send_email', description: 'Send emails to prospects' }
-                ]
+                // email_template is preserved from existingConfig if it exists
               };
 
-              const { data: workflow, error: workflowError } = await supabase
-                .from('workflows')
-                .insert({
-                  user_id: user.id,
-                  conversation_id: convId,
-                  name: config.name,
-                  description: workflowData.description,
-                  workflow_config: workflowData,
-                  instructions: config.custom_prompt || '',
-                  schedule_config: workflowData.schedule,
-                  status: 'draft'
-                })
-                .select()
-                .single();
+              if (existingWorkflow) {
+                // Update existing workflow instead of creating new one
+                const { data: updatedWorkflow, error: updateError } = await supabase
+                  .from('workflows')
+                  .update({
+                    name: config.name,
+                    description: `Campaign: ${config.name}`,
+                    workflow_config: workflowConfig, // Only config fields, not top-level fields
+                    instructions: config.custom_prompt || '',
+                    schedule_config: { frequency: 'daily', time: '09:00', batch_size: 25 },
+                    updated_at: new Date().toISOString()
+                  })
+                  .eq('id', existingWorkflow.id)
+                  .select()
+                  .single();
 
-              if (workflowError) throw workflowError;
+                if (updateError) throw updateError;
+                workflow = updatedWorkflow;
+                console.log('✅ Updated existing workflow (preserved email_template):', workflow.id);
+                console.log('   Template preserved:', !!workflowConfig.email_template);
+              } else {
+                // Create new workflow
+                const { data: newWorkflow, error: workflowError } = await supabase
+                  .from('workflows')
+                  .insert({
+                    user_id: user.id,
+                    conversation_id: convId,
+                    name: config.name,
+                    description: `Campaign: ${config.name}`,
+                    workflow_config: workflowConfig,
+                    instructions: config.custom_prompt || '',
+                    schedule_config: { frequency: 'daily', time: '09:00', batch_size: 25 },
+                    status: 'draft'
+                  })
+                  .select()
+                  .single();
+
+                if (workflowError) throw workflowError;
+                workflow = newWorkflow;
+                console.log('✅ Created new workflow:', workflow.id);
+              }
 
               // Map tone values: "professional" -> "formal" (database enum only accepts 'formal', 'casual', 'witty')
               const toneMap: Record<string, 'formal' | 'casual' | 'witty'> = {
@@ -334,38 +463,105 @@ let accumulatedToolCalls: Map<number, any> = new Map();
                   .eq('id', convId);
               }
 
-              // Set message metadata to display WorkflowCard with Test Run button
-              setMessages(prev => {
-                const updated = [...prev];
-                if (updated[assistantMessageIndex]) {
-                  updated[assistantMessageIndex] = {
-                    ...updated[assistantMessageIndex],
-                    metadata: {
-                      type: 'workflow',
-                      workflowId: workflow.id,
-                      workflowData: {
-                        id: workflow.id,
-                        name: config.name,
-                        description: workflowData.description,
-                        goal: config.goal,
-                        target_criteria: config.target_criteria,
-                        tone: config.tone,
-                        instructions: config.custom_prompt || '',
-                        schedule: workflowData.schedule,
-                        steps: workflowData.steps
+              // Check if template question was asked in THIS conversation (not in messages array yet)
+              // Look at the current messages array to see if template was asked
+              const hasTemplateQuestion = messages.some(msg => 
+                msg?.role === 'assistant' && 
+                msg.content && 
+                (msg.content.toLowerCase().includes('paste your email template') || 
+                 msg.content.toLowerCase().includes('template below') ||
+                 (msg.content.toLowerCase().includes('template') && msg.content.toLowerCase().includes('skip')))
+              );
+              
+              // If no template question yet, check if user already responded to a template question
+              // This handles the case where user pastes template before campaign is created
+              const hasTemplateResponse = workflowConfig.email_template || messages.some(msg => 
+                msg?.role === 'user' && 
+                msg.content && 
+                msg.content.length > 0 &&
+                // Check if this user message came AFTER a template question
+                (() => {
+                  const msgIndex = messages.indexOf(msg);
+                  const templateQIndex = messages.findIndex(m => 
+                    m?.role === 'assistant' && 
+                    m.content && 
+                    (m.content.toLowerCase().includes('paste your email template') || 
+                     m.content.toLowerCase().includes('template below'))
+                  );
+                  return templateQIndex >= 0 && msgIndex > templateQIndex;
+                })() &&
+                (msg.content.toLowerCase().includes('skip') ||
+                 msg.content.length > 50) // Likely a template if long
+              );
+              
+              // Only show campaign card and success message if template question was asked AND responded to
+              const shouldShowCard = hasTemplateQuestion && (hasTemplateResponse || workflowConfig.email_template);
+              
+              // If template question wasn't asked yet, silently create campaign but don't show card/message
+              if (!shouldShowCard) {
+                // Campaign is created in DB, but don't show card or success message - wait for template flow
+                console.log('Campaign created silently - waiting for template flow. Template question asked:', hasTemplateQuestion, 'Template response:', hasTemplateResponse);
+                // Set a fallback message asking about template if AI didn't generate one
+                // This ensures we have content even if AI only called the tool without text
+                if (!finalAssistantContent || finalAssistantContent.trim() === '') {
+                  finalAssistantContent = "Please paste your email template below, or type 'skip' if you'd like me to use my default template.";
+                }
+                // Don't show toast
+                // Don't show card
+                // Don't return early - let code continue but skip showing card/message
+              } else {
+                // Template flow completed - show card and success message
+                // Set message metadata to display WorkflowCard with Test Run button
+                setMessages(prev => {
+                  const updated = [...prev];
+                  // Find the assistant message dynamically
+                  let targetIndex = -1;
+                  if (assistantMessageIndex < updated.length && updated[assistantMessageIndex]?.role === 'assistant') {
+                    targetIndex = assistantMessageIndex;
+                  } else {
+                    // Fallback: find the last assistant message
+                    for (let i = updated.length - 1; i >= Math.max(0, assistantMessageIndex - 2); i--) {
+                      if (updated[i]?.role === 'assistant') {
+                        targetIndex = i;
+                        break;
                       }
                     }
-                  };
-                }
-                return updated;
-              });
+                  }
+                  
+                  if (targetIndex >= 0 && targetIndex < updated.length) {
+                    updated[targetIndex] = {
+                      ...updated[targetIndex],
+                      metadata: {
+                        type: 'workflow',
+                        workflowId: workflow.id,
+                        workflowData: {
+                          id: workflow.id,
+                          name: config.name,
+                          description: `Campaign: ${config.name}`,
+                          goal: config.goal,
+                          target_criteria: config.target_criteria,
+                          tone: config.tone,
+                          instructions: config.custom_prompt || '',
+                          schedule: { frequency: 'daily', time: '09:00', batch_size: 25 },
+                          steps: [
+                            { action: 'find_prospects', description: 'Find prospects matching criteria' },
+                            { action: 'generate_email', description: 'Generate personalized emails' },
+                            { action: 'send_email', description: 'Send emails to prospects' }
+                          ]
+                        }
+                      }
+                    };
+                  }
+                  return updated;
+                });
 
-              toast({
-                title: "Campaign created!",
-                description: `"${config.name}" is ready. Click "Test Run" to test it.`,
-              });
+                toast({
+                  title: "Campaign created!",
+                  description: `"${config.name}" is ready. Click "Test Run" to test it.`,
+                });
 
-              finalAssistantContent = `Created campaign "${config.name}". Click "Test Run" below to test it with a small batch.`;
+                finalAssistantContent = `Perfect! I've created your campaign "${config.name}".\n\n**Click the "Test Run" button below to generate email drafts.**\n\nThe test run will find prospects matching your criteria and send draft emails to your email address for review.`;
+              }
 
             } catch (error: any) {
               console.error('Error creating campaign:', error);
@@ -403,18 +599,34 @@ let accumulatedToolCalls: Map<number, any> = new Map();
                 workflowData.id = workflow.id;
               }
               
-setMessages(prev => {
-  const updated = [...prev];
-  updated[assistantMessageIndex] = {
-    ...updated[assistantMessageIndex],
-    metadata: {
-      type: 'workflow',
-      workflowId: workflow?.id,
-      workflowData
-    }
-  };
-  return updated;
-});
+              setMessages(prev => {
+                const updated = [...prev];
+                // Find the assistant message dynamically
+                let targetIndex = -1;
+                if (assistantMessageIndex < updated.length && updated[assistantMessageIndex]?.role === 'assistant') {
+                  targetIndex = assistantMessageIndex;
+                } else {
+                  // Fallback: find the last assistant message
+                  for (let i = updated.length - 1; i >= Math.max(0, assistantMessageIndex - 2); i--) {
+                    if (updated[i]?.role === 'assistant') {
+                      targetIndex = i;
+                      break;
+                    }
+                  }
+                }
+                
+                if (targetIndex >= 0 && targetIndex < updated.length) {
+                  updated[targetIndex] = {
+                    ...updated[targetIndex],
+                    metadata: {
+                      type: 'workflow',
+                      workflowId: workflow?.id,
+                      workflowData
+                    }
+                  };
+                }
+                return updated;
+              });
 
 // Auto-create a campaign from the workflow so "create it" actually creates it
 try {
@@ -475,7 +687,7 @@ try {
                 if (!user) throw new Error('Not authenticated');
                 
                 // Get the first user message to use as title, or use default
-                const firstUserMessage = messages.find(m => m.role === 'user')?.content;
+                const firstUserMessage = messages.find(m => m && m.role === 'user')?.content;
                 // Ensure we have a valid string for the title
                 const titleMessage = (firstUserMessage && typeof firstUserMessage === 'string' && firstUserMessage.trim()) 
                   ? firstUserMessage.trim() 
@@ -837,14 +1049,30 @@ try {
               // Add TemplateCard to chat
               setMessages(prev => {
                 const updated = [...prev];
-                updated[assistantMessageIndex] = {
-                  ...updated[assistantMessageIndex],
-                  metadata: {
-                    type: 'template',
-                    templateId: template.id,
-                    templateData: template
+                // Find the assistant message dynamically
+                let targetIndex = -1;
+                if (assistantMessageIndex < updated.length && updated[assistantMessageIndex]?.role === 'assistant') {
+                  targetIndex = assistantMessageIndex;
+                } else {
+                  // Fallback: find the last assistant message
+                  for (let i = updated.length - 1; i >= Math.max(0, assistantMessageIndex - 2); i--) {
+                    if (updated[i]?.role === 'assistant') {
+                      targetIndex = i;
+                      break;
+                    }
                   }
-                };
+                }
+                
+                if (targetIndex >= 0 && targetIndex < updated.length) {
+                  updated[targetIndex] = {
+                    ...updated[targetIndex],
+                    metadata: {
+                      type: 'template',
+                      templateId: template.id,
+                      templateData: template
+                    }
+                  };
+                }
                 return updated;
               });
 
@@ -1183,10 +1411,10 @@ try {
                 console.log('✅ Auto-created workflow:', workflowId);
               }
 
-              // Get current workflow config
+              // Get current workflow config and full workflow data
               const { data: currentWorkflow, error: fetchError } = await supabase
                 .from('workflows')
-                .select('workflow_config')
+                .select('workflow_config, name, id')
                 .eq('id', workflowId)
                 .eq('user_id', user.id)
                 .single();
@@ -1221,12 +1449,270 @@ try {
                 ? 'example email template'
                 : 'structured template';
 
-              toast({
-                title: "✅ Email template saved",
-                description: `Custom ${templateDescription} has been set for this workflow. All emails will follow this template.`,
-              });
+              // Check if workflow has target_criteria, or extract from conversation messages
+              let targetCriteria = updatedConfig.target_criteria;
+              
+              // If no target criteria in workflow, try to extract from conversation messages
+              if (!targetCriteria || (!targetCriteria.job_titles?.length && !targetCriteria.industry && !targetCriteria.location)) {
+                // Look for target criteria in user messages
+                for (let i = messages.length - 1; i >= 0; i--) {
+                  const msg = messages[i];
+                  if (msg?.role === 'user' && msg.content) {
+                    const content = msg.content.toLowerCase();
+                    // Try to extract target info from user's message
+                    // Look for patterns like "executive directors of reentry nonprofits"
+                    if (content.includes('director') || content.includes('executive') || content.includes('manager') || 
+                        content.includes('engineer') || content.includes('professor') || content.includes('chief')) {
+                      // Extract job titles and industry from the message
+                      const jobTitles: string[] = [];
+                      let industry: string | undefined;
+                      
+                      // Simple extraction - look for common patterns
+                      if (content.includes('executive director')) jobTitles.push('Executive Director');
+                      if (content.includes('program director')) jobTitles.push('Program Director');
+                      if (content.includes('software engineer')) jobTitles.push('Software Engineer');
+                      if (content.includes('product manager')) jobTitles.push('Product Manager');
+                      
+                      // Extract industry (look for "of X" or "in X")
+                      const ofMatch = content.match(/of\s+([^,.\n]+)/i);
+                      const inMatch = content.match(/in\s+([^,.\n]+)/i);
+                      if (ofMatch) industry = ofMatch[1].trim();
+                      else if (inMatch) industry = inMatch[1].trim();
+                      
+                      if (jobTitles.length > 0 || industry) {
+                        targetCriteria = {
+                          job_titles: jobTitles.length > 0 ? jobTitles : undefined,
+                          industry: industry,
+                          location: 'United States', // Default
+                        };
+                        break;
+                      }
+                    }
+                  }
+                }
+              }
+              
+              const hasTargetCriteria = targetCriteria && (
+                (targetCriteria.job_titles && targetCriteria.job_titles.length > 0) ||
+                targetCriteria.industry ||
+                targetCriteria.location
+              );
 
-              finalAssistantContent = `Perfect! I've saved your custom ${templateDescription}. All emails generated for this workflow will follow this template. You can run a test to see it in action.`;
+              // Check if campaign already exists for this conversation
+              let campaignExists = false;
+              if (convId) {
+                const { data: existingCampaign } = await supabase
+                  .from('campaign_conversations')
+                  .select('campaign_id')
+                  .eq('id', convId)
+                  .single();
+                campaignExists = !!existingCampaign?.campaign_id;
+              }
+
+              // If we have target criteria but no campaign, create campaign automatically
+              if (hasTargetCriteria && !campaignExists) {
+                try {
+                  // Create campaign
+                  const campaignName = currentWorkflow.name || 'Email Campaign';
+                  const { data: campaign, error: campaignError } = await supabase
+                    .from('campaigns')
+                    .insert({
+                      user_id: user.id,
+                      name: campaignName,
+                      target_criteria: targetCriteria,
+                      tone: updatedConfig.tone || 'casual',
+                      goal: updatedConfig.goal || 'meeting',
+                      custom_prompt: '',
+                      status: 'draft'
+                    })
+                    .select()
+                    .single();
+
+                  if (campaignError) throw campaignError;
+
+                  // Link campaign to conversation
+                  if (convId) {
+                    await supabase
+                      .from('campaign_conversations')
+                      .update({ campaign_id: campaign.id })
+                      .eq('id', convId);
+                  }
+
+                  // Update messages: add workflow card to this message AND update any existing campaign card
+                  setMessages(prev => {
+                    const updated = [...prev];
+                    
+                    // First, find and update any existing workflow card message to refresh it
+                    for (let i = 0; i < updated.length; i++) {
+                      if (updated[i]?.metadata?.type === 'workflow' && updated[i].metadata.workflowId === workflowId) {
+                        updated[i] = {
+                          ...updated[i],
+                          metadata: {
+                            ...updated[i].metadata,
+                            workflowData: {
+                              id: workflowId,
+                              name: campaignName,
+                              description: `Campaign: ${campaignName}`,
+                              goal: updatedConfig.goal || 'meeting',
+                              target_criteria: targetCriteria,
+                              tone: updatedConfig.tone || 'casual',
+                              instructions: '',
+                              schedule: { frequency: 'daily', time: '09:00', batch_size: 25 },
+                              steps: [
+                                { action: 'find_prospects', description: 'Find prospects matching criteria' },
+                                { action: 'generate_email', description: 'Generate personalized emails' },
+                                { action: 'send_email', description: 'Send emails to prospects' }
+                              ]
+                            }
+                          }
+                        };
+                      }
+                    }
+                    
+                    // Also add workflow card to the current assistant message (template saved message)
+                    let targetIndex = -1;
+                    for (let i = updated.length - 1; i >= 0; i--) {
+                      if (updated[i]?.role === 'assistant') {
+                        targetIndex = i;
+                        break;
+                      }
+                    }
+                    
+                    if (targetIndex >= 0 && targetIndex < updated.length) {
+                      updated[targetIndex] = {
+                        ...updated[targetIndex],
+                        metadata: {
+                          type: 'workflow',
+                          workflowId: workflowId,
+                          workflowData: {
+                            id: workflowId,
+                            name: campaignName,
+                            description: `Campaign: ${campaignName}`,
+                            goal: updatedConfig.goal || 'meeting',
+                            target_criteria: targetCriteria,
+                            tone: updatedConfig.tone || 'casual',
+                            instructions: '',
+                            schedule: { frequency: 'daily', time: '09:00', batch_size: 25 },
+                            steps: [
+                              { action: 'find_prospects', description: 'Find prospects matching criteria' },
+                              { action: 'generate_email', description: 'Generate personalized emails' },
+                              { action: 'send_email', description: 'Send emails to prospects' }
+                            ]
+                          }
+                        }
+                      };
+                    }
+                    return updated;
+                  });
+                  
+                  // Scroll to the workflow card after a brief delay
+                  setTimeout(() => {
+                    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+                  }, 100);
+
+                  toast({
+                    title: "✅ Template saved & Campaign created!",
+                    description: `Your ${templateDescription} has been saved and campaign is ready.`,
+                  });
+
+                  finalAssistantContent = `Perfect! I've saved your custom ${templateDescription} and created your campaign. Click the 'Test Run' button below to generate email drafts.`;
+                } catch (campaignCreateError: any) {
+                  console.error('Error auto-creating campaign:', campaignCreateError);
+                  // Continue with just template save message
+                  toast({
+                    title: "✅ Email template saved",
+                    description: `Custom ${templateDescription} has been set for this workflow. All emails will follow this template.`,
+                  });
+                  finalAssistantContent = `Perfect! I've saved your custom ${templateDescription}. All emails generated for this workflow will follow this template. You can run a test to see it in action.`;
+                }
+              } else {
+                // Campaign already exists - ALWAYS add workflow card to this message so user can see Test Run button
+                // Find the existing campaign to get its data
+                let existingCampaignData = null;
+                if (convId) {
+                  const { data: conversation } = await supabase
+                    .from('campaign_conversations')
+                    .select('campaign_id')
+                    .eq('id', convId)
+                    .single();
+                  
+                  if (conversation?.campaign_id) {
+                    const { data: campaign } = await supabase
+                      .from('campaigns')
+                      .select('*')
+                      .eq('id', conversation.campaign_id)
+                      .single();
+                    existingCampaignData = campaign;
+                  }
+                }
+                
+                // Get full workflow data for the card
+                const { data: fullWorkflow } = await supabase
+                  .from('workflows')
+                  .select('*')
+                  .eq('id', workflowId)
+                  .single();
+                
+                // ALWAYS add workflow card to the template saved message (template was just saved, so show card)
+                setMessages(prev => {
+                  const updated = [...prev];
+                  // Find the assistant message for this tool call (should be the current/last one)
+                  let targetIndex = -1;
+                  if (assistantMessageIndex < updated.length && updated[assistantMessageIndex]?.role === 'assistant') {
+                    targetIndex = assistantMessageIndex;
+                  } else {
+                    // Fallback: find the last assistant message
+                    for (let i = updated.length - 1; i >= Math.max(0, updated.length - 3); i--) {
+                      if (updated[i]?.role === 'assistant') {
+                        targetIndex = i;
+                        break;
+                      }
+                    }
+                  }
+                  
+                  if (targetIndex >= 0 && targetIndex < updated.length) {
+                    const config = fullWorkflow?.workflow_config || updatedConfig;
+                    const campaignName = existingCampaignData?.name || fullWorkflow?.name || currentWorkflow.name || 'Email Campaign';
+                    const campaignTargetCriteria = existingCampaignData?.target_criteria || config.target_criteria || targetCriteria || {};
+                    
+                    updated[targetIndex] = {
+                      ...updated[targetIndex],
+                      metadata: {
+                        type: 'workflow',
+                        workflowId: workflowId,
+                        workflowData: {
+                          id: workflowId,
+                          name: campaignName,
+                          description: `Campaign: ${campaignName}`,
+                          goal: existingCampaignData?.goal || config.goal || 'meeting',
+                          target_criteria: campaignTargetCriteria,
+                          tone: existingCampaignData?.tone || config.tone || 'casual',
+                          instructions: config.custom_prompt || '',
+                          schedule: fullWorkflow?.schedule_config || { frequency: 'daily', time: '09:00', batch_size: 25 },
+                          steps: [
+                            { action: 'find_prospects', description: 'Find prospects matching criteria' },
+                            { action: 'generate_email', description: 'Generate personalized emails' },
+                            { action: 'send_email', description: 'Send emails to prospects' }
+                          ]
+                        }
+                      }
+                    };
+                  }
+                  return updated;
+                });
+                
+                // Scroll to show the workflow card
+                setTimeout(() => {
+                  messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+                }, 100);
+                
+                toast({
+                  title: "✅ Email template saved",
+                  description: `Custom ${templateDescription} has been set for this workflow. All emails will follow this template.`,
+                });
+
+                finalAssistantContent = `Perfect! I've saved your email template. Click the 'Test Run' button below to generate email drafts.`;
+              }
             } catch (error: any) {
               console.error('Error setting email template:', error);
               const errorMessage = error?.message || error?.details || error?.hint || 'Unknown error occurred';
@@ -1244,13 +1730,29 @@ try {
               // Add special metadata to show Gmail connection button
               setMessages(prev => {
                 const updated = [...prev];
-                updated[assistantMessageIndex] = {
-                  ...updated[assistantMessageIndex],
-                  metadata: {
-                    type: 'gmail_connect',
-                    reason
+                // Find the assistant message dynamically
+                let targetIndex = -1;
+                if (assistantMessageIndex < updated.length && updated[assistantMessageIndex]?.role === 'assistant') {
+                  targetIndex = assistantMessageIndex;
+                } else {
+                  // Fallback: find the last assistant message
+                  for (let i = updated.length - 1; i >= Math.max(0, assistantMessageIndex - 2); i--) {
+                    if (updated[i]?.role === 'assistant') {
+                      targetIndex = i;
+                      break;
+                    }
                   }
-                };
+                }
+                
+                if (targetIndex >= 0 && targetIndex < updated.length) {
+                  updated[targetIndex] = {
+                    ...updated[targetIndex],
+                    metadata: {
+                      type: 'gmail_connect',
+                      reason
+                    }
+                  };
+                }
                 return updated;
               });
 
@@ -1265,25 +1767,85 @@ try {
 
     // Update the assistant message with final content and persist
     if (convId) {
-      const contentToSave = finalAssistantContent || streamedContent || 'I can help you create a campaign.';
+      // Only use fallback if we truly have no content AND no tool calls were made
+      const hasToolCalls = accumulatedToolCalls.size > 0;
+      const contentToSave = finalAssistantContent || streamedContent;
       
-      // Get the latest metadata from the current message state (may have been updated by tool calls)
-      const currentMessage = messages[assistantMessageIndex];
-      const metadataToSave = currentMessage?.metadata || messages[assistantMessageIndex]?.metadata;
+      if (!contentToSave || (contentToSave.trim() === '' && !hasToolCalls)) {
+        console.error('No content received from API:', {
+          finalAssistantContent,
+          streamedContent,
+          hasToolCalls,
+          toolCallsCount: accumulatedToolCalls.size
+        });
+        throw new Error('No response content received from the AI. The API may have failed silently. Please try again.');
+      }
       
       // Update the UI message with final content (preserve metadata)
+      // Find the assistant message dynamically to ensure we update the correct one
       setMessages(prev => {
         const updated = [...prev];
-        if (updated[assistantMessageIndex]) {
-          updated[assistantMessageIndex] = {
-            ...updated[assistantMessageIndex],
+        let targetIndex = -1;
+        
+        // Find the assistant message that matches our streamed content
+        // Look for assistant message with content matching streamedContent or empty
+        for (let i = updated.length - 1; i >= Math.max(0, assistantMessageIndex - 3); i--) {
+          if (updated[i]?.role === 'assistant') {
+            const msgContent = updated[i].content || '';
+            // Match if content is empty, matches streamed content, or is a prefix of streamed content
+            if (msgContent === '' || 
+                msgContent === streamedContent || 
+                streamedContent.startsWith(msgContent) ||
+                msgContent.startsWith(streamedContent)) {
+              targetIndex = i;
+              break;
+            }
+          }
+        }
+        
+        // Fallback to original index if we couldn't find a match
+        if (targetIndex === -1 && assistantMessageIndex < updated.length && 
+            updated[assistantMessageIndex]?.role === 'assistant') {
+          targetIndex = assistantMessageIndex;
+        }
+        
+        if (targetIndex >= 0 && targetIndex < updated.length) {
+          const currentMessage = updated[targetIndex];
+          const metadataToSave = currentMessage?.metadata;
+          
+          updated[targetIndex] = {
+            ...currentMessage,
             content: contentToSave,
-            // Preserve metadata if it exists
+            // CRITICAL: Preserve metadata if it exists (workflow card, etc.)
             ...(metadataToSave && { metadata: metadataToSave })
           };
+        } else {
+          // Fallback: append if we can't find the message (shouldn't happen normally)
+          console.warn('Could not find assistant message for final update, appending new message');
+          updated.push({
+            role: 'assistant',
+            content: contentToSave
+          });
         }
+        
         return updated;
       });
+      
+      // Get metadata from the updated state for saving to DB
+      const metadataToSave = (() => {
+        // Try to get from current state first
+        let targetIndex = -1;
+        for (let i = messages.length - 1; i >= Math.max(0, assistantMessageIndex - 3); i--) {
+          if (messages[i]?.role === 'assistant') {
+            targetIndex = i;
+            break;
+          }
+        }
+        if (targetIndex === -1 && assistantMessageIndex < messages.length) {
+          targetIndex = assistantMessageIndex;
+        }
+        return targetIndex >= 0 ? messages[targetIndex]?.metadata : undefined;
+      })();
       
       // Save to DB with metadata - but don't update local state (real-time subscription will handle it)
       const { error } = await supabase
@@ -1325,10 +1887,20 @@ try {
                          errorMessage.includes('service is currently unavailable') ||
                          errorMessage.includes('try again');
       
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: errorMessage + (isRetryable ? '\n\n💡 This is usually temporary - please try again in a few moments.' : '')
-      }]);
+      // Remove any empty assistant message placeholder and add error message
+      setMessages(prev => {
+        const filtered = prev.filter((msg, idx) => {
+          // Remove empty assistant messages (placeholders) at the end
+          if (msg.role === 'assistant' && (!msg.content || msg.content.trim() === '') && idx === prev.length - 1) {
+            return false;
+          }
+          return true;
+        });
+        return [...filtered, {
+          role: 'assistant',
+          content: errorMessage + (isRetryable ? '\n\n💡 This is usually temporary - please try again in a few moments.' : '')
+        }];
+      });
       
       toast({
         title: isRetryable ? "Service Temporarily Unavailable" : "Error",
@@ -1361,9 +1933,10 @@ try {
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
           {messages
-            .filter(msg => msg && msg.role)
+            .filter(msg => msg && msg.role && msg.content != null)
             // Filter out duplicate execution monitors - only show the most recent one per conversation
             .filter((message, index, arr) => {
+              if (!message || !message.role) return false;
               if (message.metadata?.type === 'execution') {
                 // Find all execution messages
                 const executionMessages = arr.filter(m => m && m.metadata?.type === 'execution');
@@ -1373,9 +1946,13 @@ try {
               }
               return true;
             })
-            .map((message, index) => (
+            .map((message, index) => {
+              // Safety check - should never happen after filter, but just in case
+              if (!message || !message.role) return null;
+              
+              return (
             <div
-              key={index}
+              key={message.id || index}
               className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               {message.role === 'assistant' && message.metadata?.type === 'gmail_connect' ? (
@@ -1395,8 +1972,69 @@ try {
                 <div className="max-w-[90%] space-y-3">
                   <WorkflowCard
                     workflow={message.metadata.workflowData}
-                    onEdit={() => {
-                      setInput(`Update the workflow: `);
+                    onEdit={async () => {
+                      // Send message directly without showing in input field
+                      const userMessage = "I'd like to upload an email template for this workflow.";
+                      setLoading(true);
+
+                      try {
+                        let convId = currentConvId;
+                        if (!convId) {
+                          convId = await createConversation(userMessage);
+                          setCurrentConvId(convId);
+                          navigate(`/campaigns/ai-create/${convId}`, { replace: true });
+                        }
+
+                        // Add user message to UI and get updated messages
+                        let updatedMessages: Message[] = [];
+                        setMessages(prev => {
+                          const validPrev = prev.filter(msg => msg && msg.role && msg.content != null);
+                          const exists = validPrev.some(msg => msg.role === 'user' && msg.content === userMessage);
+                          if (exists) {
+                            updatedMessages = validPrev;
+                            return validPrev;
+                          }
+                          updatedMessages = [...validPrev, { role: 'user' as const, content: userMessage }];
+                          return updatedMessages;
+                        });
+
+                        // Save user message to DB
+                        if (convId) {
+                          await saveMessage(convId, 'user', userMessage);
+                        }
+
+                        // Call AI with updated messages
+                        const { data: { user } } = await supabase.auth.getUser();
+                        if (!user) throw new Error('Not authenticated');
+
+                        const response = await supabase.functions.invoke('campaign-chat', {
+                          body: { messages: updatedMessages.map(m => ({ role: m.role, content: m.content })) }
+                        });
+
+                        if (response.error) throw response.error;
+
+                        const assistantMessage = response.data.response || response.data.message || 'I can help you upload an email template. Please paste your template below.';
+                        
+                        setMessages(prev => {
+                          const validPrev = prev.filter(msg => msg && msg.role && msg.content != null);
+                          const exists = validPrev.some(msg => msg.role === 'assistant' && msg.content === assistantMessage);
+                          if (exists) return validPrev;
+                          return [...validPrev, { role: 'assistant' as const, content: assistantMessage }];
+                        });
+
+                        if (convId) {
+                          await saveMessage(convId, 'assistant', assistantMessage);
+                        }
+                      } catch (error: any) {
+                        console.error('Error sending template upload message:', error);
+                        toast({
+                          title: "Error",
+                          description: error.message || "Failed to send message",
+                          variant: "destructive",
+                        });
+                      } finally {
+                        setLoading(false);
+                      }
                     }}
                     onTestRun={async () => {
                       const workflowId = message.metadata?.workflowId;
@@ -1606,7 +2244,9 @@ try {
                 </div>
               )}
             </div>
-          ))}
+            );
+            })
+            .filter(Boolean)}
           {loading && (
             <div className="flex justify-start">
               <div className="bg-card border border-border rounded-2xl px-5 py-3.5 shadow-sm">

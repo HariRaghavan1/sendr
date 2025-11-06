@@ -31,56 +31,31 @@ export async function checkCladoCredits(cladoApiKey: string): Promise<{ credits:
 
 export function buildCladoQuery(targetCriteria: any): string {
   const parts: string[] = [];
-  
-  // Job titles are the most important - always include if available
-  if (targetCriteria.job_titles?.length) {
-    // Filter out empty strings and normalize
-    const validTitles = targetCriteria.job_titles
-      .filter((title: string) => title && title.trim().length > 0)
-      .map((title: string) => title.trim());
-    
-    if (validTitles.length > 0) {
-      // Use "OR" for multiple titles, but keep it simple
-      if (validTitles.length === 1) {
-        parts.push(validTitles[0]);
-      } else {
-        parts.push(validTitles.join(' OR '));
-      }
+
+  // Match original's simple logic exactly
+  if (targetCriteria.job_titles) {
+    const titles = Array.isArray(targetCriteria.job_titles)
+      ? targetCriteria.job_titles.join(' or ')
+      : targetCriteria.job_titles;
+    if (titles && titles.trim()) {
+      parts.push(titles);
     }
   }
   
-  // Location - use simpler format
-  if (targetCriteria.location && targetCriteria.location.trim()) {
-    parts.push(`in ${targetCriteria.location.trim()}`);
+  if (targetCriteria.industry) {
+    parts.push(`in ${targetCriteria.industry}`);
   }
   
-  // Industry - use simpler format
-  if (targetCriteria.industry && targetCriteria.industry.trim()) {
-    parts.push(`${targetCriteria.industry.trim()} industry`);
+  if (targetCriteria.location) {
+    parts.push(`located in ${targetCriteria.location}`);
   }
   
-  // Companies - only if explicitly provided
-  if (targetCriteria.companies?.length) {
-    const validCompanies = targetCriteria.companies
-      .filter((company: string) => company && company.trim().length > 0)
-      .map((company: string) => company.trim());
-    
-    if (validCompanies.length > 0) {
-      if (validCompanies.length === 1) {
-        parts.push(`at ${validCompanies[0]}`);
-      } else {
-        parts.push(`at (${validCompanies.join(' OR ')})`);
-      }
-    }
+  if (targetCriteria.company_size) {
+    parts.push(`at ${targetCriteria.company_size} companies`);
   }
-  
-  // If we have job titles, use them as the base query
-  // Otherwise return a generic query
-  const query = parts.length > 0 ? parts.join(' ') : 'professionals';
-  
-  // Log the query for debugging
+
+  const query = parts.join(' ') || 'professionals';
   console.log('Built Clado query:', query, 'from criteria:', JSON.stringify(targetCriteria));
-  
   return query;
 }
 

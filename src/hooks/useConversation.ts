@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 
 export interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
+  id?: string;
   metadata?: {
     type?: 'workflow' | 'campaign' | 'execution' | 'template' | 'gmail_connect';
     workflowId?: string;
@@ -15,6 +16,10 @@ export interface Message {
     reason?: string;
   };
 }
+
+// Global message cache to persist messages across conversation switches
+const messageCache = new Map<string, Message[]>();
+const titleCache = new Map<string, string>();
 
 /**
  * Custom hook for managing campaign conversation state and persistence
@@ -31,12 +36,27 @@ export const useConversation = (conversationId?: string) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [title, setTitle] = useState<string>('');
   const [loading, setLoading] = useState(false);
+  const loadedConversations = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (conversationId) {
-      loadConversation(conversationId);
+      // Check cache first for instant loading
+      if (messageCache.has(conversationId)) {
+        const cachedMessages = messageCache.get(conversationId) || [];
+        const cachedTitle = titleCache.get(conversationId) || '';
+        setMessages(cachedMessages);
+        setTitle(cachedTitle);
+        
+        // Still load from DB in background to ensure we have latest (but don't clear cache)
+        if (!loadedConversations.current.has(conversationId)) {
+          loadConversation(conversationId);
+        }
+      } else {
+        // Load from database if not in cache
+        loadConversation(conversationId);
+      }
     } else {
-      // Reset state for new conversation
+      // For new conversations, use empty array but don't clear cache
       setMessages([]);
       setTitle('');
     }
@@ -53,7 +73,9 @@ export const useConversation = (conversationId?: string) => {
         .single();
 
       if (conversation) {
-        setTitle(conversation.title);
+        const conversationTitle = conversation.title || '';
+        setTitle(conversationTitle);
+        titleCache.set(id, conversationTitle);
       }
 
       // Load messages
@@ -66,13 +88,23 @@ export const useConversation = (conversationId?: string) => {
       if (msgs) {
         // Map database records to Message interface, filtering out invalid messages
         const mappedMessages: Message[] = msgs
-          .filter(msg => msg.role && msg.content != null && msg.content !== '')
+          .filter(msg => msg && msg.role && msg.content != null && msg.content !== '')
           .map(msg => ({
+            id: msg.id,
             role: msg.role as 'user' | 'assistant' | 'system',
             content: msg.content,
             metadata: msg.metadata as Message['metadata']
           }));
+        
+        // Update cache and state
+        messageCache.set(id, mappedMessages);
         setMessages(mappedMessages);
+        loadedConversations.current.add(id);
+      } else {
+        // If no messages found, ensure we have an empty array in cache
+        messageCache.set(id, []);
+        setMessages([]);
+        loadedConversations.current.add(id);
       }
     } catch (error) {
       console.error('Error loading conversation:', error);
@@ -112,6 +144,8 @@ export const useConversation = (conversationId?: string) => {
       if (error) throw error;
 
       setTitle(generatedTitle);
+      titleCache.set(conversation.id, generatedTitle);
+      messageCache.set(conversation.id, []); // Initialize empty cache for new conversation
       return conversation.id;
     } catch (error) {
       console.error('Error creating conversation:', error);
@@ -120,7 +154,7 @@ export const useConversation = (conversationId?: string) => {
   };
 
   /**
-   * Saves a message to the database and updates local state
+   * Saves a message to the database and updates local state and cache
    *
    * @param conversationId - The conversation to add the message to
    * @param role - The role of the message sender ('user' or 'assistant')
@@ -135,30 +169,62 @@ export const useConversation = (conversationId?: string) => {
     metadata?: Message['metadata']
   ) => {
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('conversation_messages')
         .insert({
           conversation_id: conversationId,
           role,
           content,
           metadata,
-        });
+        })
+        .select()
+        .single();
 
       if (error) throw error;
 
-      // Update local state
-      setMessages(prev => [...prev, { role, content, metadata }]);
+      const newMessage: Message = {
+        id: data.id,
+        role,
+        content,
+        metadata
+      };
+
+      // Update cache
+      const cachedMessages = messageCache.get(conversationId) || [];
+      messageCache.set(conversationId, [...cachedMessages, newMessage]);
+
+      // Update local state if this is the current conversation
+      setMessages(prev => {
+        // Check for duplicates
+        const exists = prev.some(m => m.id === newMessage.id || 
+          (m.role === newMessage.role && m.content === newMessage.content));
+        return exists ? prev : [...prev, newMessage];
+      });
     } catch (error) {
       console.error('Error saving message:', error);
       throw error;
     }
   };
 
+  // Enhanced setMessages that also updates cache
+  const setMessagesWithCache = (updater: Message[] | ((prev: Message[]) => Message[])) => {
+    setMessages(prev => {
+      const newMessages = typeof updater === 'function' ? updater(prev) : updater;
+      
+      // Update cache if we have a conversation ID
+      if (conversationId) {
+        messageCache.set(conversationId, newMessages);
+      }
+      
+      return newMessages;
+    });
+  };
+
   return {
     messages,
     title,
     loading,
-    setMessages,
+    setMessages: setMessagesWithCache,
     createConversation,
     saveMessage,
     loadConversation,

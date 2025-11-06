@@ -185,6 +185,22 @@ export function WorkflowCard({ workflow, onEdit, onTestRun, onDeploy }: Workflow
           </div>
         )}
 
+        {/* Email Template Status */}
+        <div className="space-y-2">
+          <h4 className="font-semibold text-sm text-muted-foreground flex items-center gap-2">
+            <FileText className="h-4 w-4" />
+            Email Generation
+          </h4>
+          <div className="bg-muted/30 rounded-lg p-3">
+            <p className="text-sm text-muted-foreground">
+              <span className="font-medium text-foreground">AI will generate emails</span> unless you upload your own template.
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Click "Edit Template" below to use a custom email template instead.
+            </p>
+          </div>
+        </div>
+
         {/* Details */}
         <div className="flex items-center gap-4 text-sm text-muted-foreground">
           <span>Tone: <span className="font-medium capitalize text-foreground">{workflow.tone}</span></span>
@@ -194,8 +210,8 @@ export function WorkflowCard({ workflow, onEdit, onTestRun, onDeploy }: Workflow
         <div className="flex items-center gap-2 pt-4 border-t">
           {onEdit && (
             <Button variant="outline" size="sm" onClick={onEdit}>
-              <Edit className="h-4 w-4 mr-2" />
-              Edit Details
+              <FileText className="h-4 w-4 mr-2" />
+              Edit Template
             </Button>
           )}
           {onTestRun && (
