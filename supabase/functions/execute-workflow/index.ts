@@ -93,9 +93,18 @@ serve(async (req) => {
 
     // Parse and validate request body
     const requestBody = await req.json();
-    const { workflow_id, execution_id } = validateInput(ExecuteWorkflowSchema, requestBody);
+    const { workflow_id, execution_id, max_prospects, skip_sending } = validateInput(ExecuteWorkflowSchema, requestBody);
 
-    console.log('Starting workflow execution:', { workflow_id, execution_id });
+    // Set defaults and clamp max_prospects
+    const limit = Math.max(1, Math.min(25, max_prospects || 5));
+    const shouldSkipSending = skip_sending !== undefined ? skip_sending : true;
+
+    console.log('Starting workflow execution:', { 
+      workflow_id, 
+      execution_id, 
+      max_prospects: limit,
+      skip_sending: shouldSkipSending 
+    });
 
     // Get workflow details
     const { data: workflow, error: workflowError } = await supabase
@@ -116,7 +125,7 @@ serve(async (req) => {
     const instructions = workflow.instructions || '';
 
     // Start log
-    await updateExecutionLog(supabase, execution_id, '[1/3] 🚀 Test run started - Initializing...');
+    await updateExecutionLog(supabase, execution_id, `[1/3] 🚀 Test run started - ${limit} prospect${limit === 1 ? '' : 's'}, ${shouldSkipSending ? 'dry run (no sending)' : 'will send emails'}`);
 
     // Get user's API keys
     await updateExecutionLog(supabase, execution_id, '[1/3] 🔑 Checking API configuration...');
@@ -197,7 +206,7 @@ serve(async (req) => {
 
           const cladoApiUrl = new URL('https://search.clado.ai/api/search');
           cladoApiUrl.searchParams.append('query', query);
-          cladoApiUrl.searchParams.append('limit', '5');
+          cladoApiUrl.searchParams.append('limit', limit.toString());
 
           const startTime = Date.now();
           const cladoResponse = await fetch(cladoApiUrl.toString(), {
@@ -328,7 +337,7 @@ serve(async (req) => {
         }
       });
 
-      prospects = allProspects.slice(0, 5); // Limit to 5 for test runs
+      prospects = allProspects.slice(0, limit); // Limit based on max_prospects parameter
       
       const searchDuration = ((Date.now() - searchStartTime) / 1000).toFixed(1);
       
@@ -568,14 +577,21 @@ serve(async (req) => {
             let sendStatus = 'skipped';
             let emailSendError = null;
 
-            // Check if prospect has email (skip sending if not)
-            const skipSending = !prospect.email || prospect.email.trim() === '';
+            // Check if prospect has email AND if we should send
+            const noProspectEmail = !prospect.email || prospect.email.trim() === '';
+            const skipSending = shouldSkipSending || noProspectEmail;
 
-            if (skipSending) {
+            if (noProspectEmail) {
               await updateExecutionLog(
                 supabase,
                 execution_id,
                 `⚠️ Skipping send for ${prospect.name} - no email address`
+              );
+            } else if (shouldSkipSending) {
+              await updateExecutionLog(
+                supabase,
+                execution_id,
+                `⚠️ Skipping send for ${prospect.name} - dry run mode`
               );
             }
 

@@ -353,6 +353,10 @@ try {
             try {
               const params = JSON.parse(toolCall.function.arguments);
               let { workflow_id, max_prospects = 5, skip_sending = true } = params;
+              
+              // Clamp max_prospects between 1 and 25
+              max_prospects = Math.max(1, Math.min(25, max_prospects));
+              
               const { data: { user } } = await supabase.auth.getUser();
               if (!user) throw new Error('Not authenticated');
 
@@ -399,7 +403,7 @@ try {
               // Add ExecutionMonitor to chat
               const execMessage: Message = {
                 role: 'assistant' as const,
-                content: `Starting test run with ${max_prospects} prospects...`,
+                content: `Starting test run for ${max_prospects} prospect${max_prospects === 1 ? '' : 's'}...`,
                 metadata: {
                   type: 'execution' as const,
                   executionId: execution.id
@@ -407,12 +411,36 @@ try {
               };
               setMessages(prev => [...prev, execMessage]);
 
-              // Trigger execution
-              await supabase.functions.invoke('execute-workflow', {
-                body: { workflow_id, execution_id: execution.id }
+              // Persist execution message to database so it survives page refreshes
+              if (convId) {
+                await saveMessage(
+                  convId, 
+                  'assistant', 
+                  execMessage.content,
+                  execMessage.metadata
+                );
+              }
+
+              // Trigger execution with max_prospects and skip_sending
+              supabase.functions.invoke('execute-workflow', {
+                body: { 
+                  workflow_id, 
+                  execution_id: execution.id,
+                  max_prospects,
+                  skip_sending
+                }
+              }).then(({ error }) => {
+                if (error) {
+                  console.error('Error executing workflow:', error);
+                  toast({
+                    title: "Execution Error",
+                    description: error.message,
+                    variant: "destructive",
+                  });
+                }
               });
 
-              finalAssistantContent = `Test run started for ${max_prospects} prospects. ${skip_sending ? 'Emails will not be sent (dry run).' : 'Emails will be sent.'}`;
+              finalAssistantContent = `Test run started for ${max_prospects} prospect${max_prospects === 1 ? '' : 's'}. See live progress below.`;
             } catch (error: any) {
               console.error('Error starting test run:', error);
               toast({
