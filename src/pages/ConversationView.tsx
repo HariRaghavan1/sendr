@@ -1347,6 +1347,7 @@ try {
               let workflowId = templateData.workflow_id;
 
               // Find workflow from conversation if not provided
+              // CRITICAL: Only look for workflows in the CURRENT conversation to avoid reusing old workflows
               if (!workflowId && convId) {
                 const { data: workflow } = await supabase
                   .from('workflows')
@@ -1362,24 +1363,10 @@ try {
                 }
               }
 
-              // If still no workflow found, try to find most recent workflow
+              // Auto-create workflow if none exists for this conversation
+              // DO NOT reuse workflows from other conversations - always create new one for new conversation
               if (!workflowId) {
-                const { data: recentWorkflow } = await supabase
-                  .from('workflows')
-                  .select('id')
-                  .eq('user_id', user.id)
-                  .order('created_at', { ascending: false })
-                  .limit(1)
-                  .maybeSingle();
-
-                if (recentWorkflow) {
-                  workflowId = recentWorkflow.id;
-                }
-              }
-
-              // Auto-create workflow if none exists
-              if (!workflowId) {
-                console.log('No workflow found, auto-creating default workflow...');
+                console.log('No workflow found for this conversation, auto-creating new workflow...');
                 
                 // Get conversation title for workflow name
                 let workflowName = 'Email Campaign';
@@ -1395,7 +1382,52 @@ try {
                   }
                 }
 
-                // Create default workflow with better default criteria
+                // Extract target criteria from conversation messages BEFORE creating workflow
+                let extractedTargetCriteria: any = {
+                  job_titles: undefined,
+                  industry: undefined,
+                  location: 'United States'
+                };
+                
+                // Look for target criteria in recent user messages
+                for (let i = messages.length - 1; i >= Math.max(0, messages.length - 10); i--) {
+                  const msg = messages[i];
+                  if (msg?.role === 'user' && msg.content) {
+                    const content = msg.content.toLowerCase();
+                    // Try to extract target info from user's message
+                    if (content.includes('director') || content.includes('executive') || content.includes('manager') || 
+                        content.includes('engineer') || content.includes('professor') || content.includes('chief')) {
+                      const jobTitles: string[] = [];
+                      let industry: string | undefined;
+                      
+                      // Simple extraction - look for common patterns
+                      if (content.includes('executive director')) jobTitles.push('Executive Director');
+                      if (content.includes('program director')) jobTitles.push('Program Director');
+                      if (content.includes('software engineer')) jobTitles.push('Software Engineer');
+                      if (content.includes('product manager')) jobTitles.push('Product Manager');
+                      if (content.includes('marketing manager')) jobTitles.push('Marketing Manager');
+                      if (content.includes('sales manager')) jobTitles.push('Sales Manager');
+                      if (content.includes('data scientist')) jobTitles.push('Data Scientist');
+                      
+                      // Extract industry (look for "of X" or "in X")
+                      const ofMatch = content.match(/of\s+([^,.\n]+)/i);
+                      const inMatch = content.match(/in\s+([^,.\n]+)/i);
+                      if (ofMatch) industry = ofMatch[1].trim();
+                      else if (inMatch) industry = inMatch[1].trim();
+                      
+                      if (jobTitles.length > 0 || industry) {
+                        extractedTargetCriteria = {
+                          job_titles: jobTitles.length > 0 ? jobTitles : undefined,
+                          industry: industry,
+                          location: 'United States',
+                        };
+                        break;
+                      }
+                    }
+                  }
+                }
+
+                // Create workflow with extracted target criteria (or defaults if none found)
                 const { data: newWorkflow, error: createError } = await supabase
                   .from('workflows')
                   .insert({
@@ -1404,9 +1436,11 @@ try {
                     name: workflowName,
                     description: 'Auto-created workflow for email template',
                     workflow_config: {
-                      target_criteria: { 
-                        job_titles: ['Software Engineer', 'Product Manager', 'Marketing Manager', 'Sales Manager', 'Data Scientist']
-                      },
+                      target_criteria: (extractedTargetCriteria.job_titles || extractedTargetCriteria.industry) 
+                        ? extractedTargetCriteria 
+                        : { 
+                            job_titles: ['Software Engineer', 'Product Manager', 'Marketing Manager', 'Sales Manager', 'Data Scientist']
+                          },
                       tone: 'casual',
                       goal: 'meeting'
                     },
@@ -1422,7 +1456,7 @@ try {
                 }
 
                 workflowId = newWorkflow.id;
-                console.log('✅ Auto-created workflow:', workflowId);
+                console.log('✅ Auto-created workflow:', workflowId, 'with target criteria:', extractedTargetCriteria);
               }
 
               // Get current workflow config and full workflow data
