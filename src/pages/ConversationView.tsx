@@ -175,6 +175,16 @@ const ConversationView = () => {
       // Wait a moment for real-time subscription to add the user message
       await new Promise(resolve => setTimeout(resolve, 100));
 
+      // Check if user typed "skip" in response to a template question
+      const isSkipResponse = userMessage.toLowerCase().trim() === 'skip';
+      const hasTemplateQuestion = messages.some(msg => 
+        msg?.role === 'assistant' && 
+        msg.content && 
+        (msg.content.toLowerCase().includes('paste your email template') || 
+         msg.content.toLowerCase().includes('template below') ||
+         (msg.content.toLowerCase().includes('template') && msg.content.toLowerCase().includes('skip')))
+      );
+
       // Get current messages state (may have been updated by real-time subscription)
       // Use a function to get the latest messages state
       let assistantMessageIndex: number;
@@ -473,9 +483,12 @@ let accumulatedToolCalls: Map<number, any> = new Map();
                  (msg.content.toLowerCase().includes('template') && msg.content.toLowerCase().includes('skip')))
               );
               
+              // Check if current user message is "skip" (it might not be in messages array yet)
+              const currentMessageIsSkip = userMessage.toLowerCase().trim() === 'skip';
+              
               // If no template question yet, check if user already responded to a template question
               // This handles the case where user pastes template before campaign is created
-              const hasTemplateResponse = workflowConfig.email_template || messages.some(msg => 
+              const hasTemplateResponse = workflowConfig.email_template || currentMessageIsSkip || messages.some(msg => 
                 msg?.role === 'user' && 
                 msg.content && 
                 msg.content.length > 0 &&
@@ -495,7 +508,8 @@ let accumulatedToolCalls: Map<number, any> = new Map();
               );
               
               // Only show campaign card and success message if template question was asked AND responded to
-              const shouldShowCard = hasTemplateQuestion && (hasTemplateResponse || workflowConfig.email_template);
+              // SPECIAL CASE: If user typed "skip" and there's a template question, always show card
+              const shouldShowCard = hasTemplateQuestion && (hasTemplateResponse || workflowConfig.email_template || (currentMessageIsSkip && hasTemplateQuestion));
               
               // If template question wasn't asked yet, silently create campaign but don't show card/message
               if (!shouldShowCard) {
@@ -1769,14 +1783,32 @@ try {
     if (convId) {
       // Only use fallback if we truly have no content AND no tool calls were made
       const hasToolCalls = accumulatedToolCalls.size > 0;
-      const contentToSave = finalAssistantContent || streamedContent;
+      let contentToSave = finalAssistantContent || streamedContent;
+      
+      // SPECIAL HANDLING: If user typed "skip" and there's a template question, ensure we have content
+      // This prevents the error when AI calls create_campaign but doesn't generate text
+      if ((!contentToSave || contentToSave.trim() === '') && isSkipResponse && hasTemplateQuestion) {
+        // Check if create_campaign was called (which means campaign was created)
+        const createCampaignCalled = Array.from(accumulatedToolCalls.values()).some(
+          tc => tc.function?.name === 'create_campaign'
+        );
+        
+        if (createCampaignCalled) {
+          // Campaign was created, provide a success message
+          contentToSave = "Perfect! I've created your campaign. Click the 'Test Run' button below to generate email drafts.";
+          finalAssistantContent = contentToSave;
+          streamedContent = contentToSave;
+        }
+      }
       
       if (!contentToSave || (contentToSave.trim() === '' && !hasToolCalls)) {
         console.error('No content received from API:', {
           finalAssistantContent,
           streamedContent,
           hasToolCalls,
-          toolCallsCount: accumulatedToolCalls.size
+          toolCallsCount: accumulatedToolCalls.size,
+          isSkipResponse,
+          hasTemplateQuestion
         });
         throw new Error('No response content received from the AI. The API may have failed silently. Please try again.');
       }
