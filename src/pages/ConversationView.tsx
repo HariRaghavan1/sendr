@@ -22,11 +22,8 @@ const ConversationView = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Only show template prompt for new conversations (no conversationId and no messages)
-    // For existing conversations, messages will be loaded by useConversation hook
     // Ensure messages array is valid (filter out any undefined/null entries)
     if (!messages || !Array.isArray(messages)) {
-      // Don't clear messages if we're switching conversations - preserve cache
       if (!conversationId) {
         setMessages([]);
       }
@@ -35,22 +32,31 @@ const ConversationView = () => {
     
     const validMessages = messages.filter(msg => msg && msg.role && msg.content != null);
     
-    // Only set initial message for truly new conversations (no ID, no cached messages)
-    if (!conversationId && validMessages.length === 0) {
-      const initialMessage: Message = {
-        role: 'assistant',
-        content: "Hi! I'll help you create an email outreach campaign.\n\n**Who would you like to target?**\n\nPlease describe your target audience (e.g., 'executive directors of reentry nonprofits', 'software engineers at tech companies', etc.)."
-      };
-      setMessages([initialMessage]);
+    // CRITICAL: When navigating to a new chat (no conversationId), always show initial message
+    // This ensures "New Chat" button works the same as "Create Campaign" button
+    if (!conversationId) {
+      // Check if we already have the initial message
+      const hasInitialMessage = validMessages.some(msg => 
+        msg.role === 'assistant' && 
+        msg.content.includes("Who would you like to target?")
+      );
       
-      // Save initial message to DB immediately when conversation is created
-      // This will happen when user sends first message (conversation gets created)
+      if (!hasInitialMessage) {
+        // Set initial message for new conversation
+        const initialMessage: Message = {
+          role: 'assistant',
+          content: "Hi! I'll help you create an email outreach campaign.\n\n**Who would you like to target?**\n\nPlease describe your target audience (e.g., 'executive directors of reentry nonprofits', 'software engineers at tech companies', etc.)."
+        };
+        setMessages([initialMessage]);
+      } else if (validMessages.length !== messages.length) {
+        // Clean up invalid messages but keep the initial message
+        setMessages(validMessages);
+      }
     } else if (validMessages.length !== messages.length && validMessages.length > 0) {
-      // Only clean up invalid messages if we have valid ones to keep
+      // For existing conversations, only clean up invalid messages
       setMessages(validMessages);
     }
-    // If switching conversations, keep the loaded messages - don't reset
-  }, [conversationId]); // Removed messages from dependencies to prevent unnecessary resets
+  }, [conversationId, messages]); // Include messages in dependencies to detect when it's cleared
 
   useEffect(() => {
     setCurrentConvId(conversationId);
