@@ -178,11 +178,6 @@ export function WorkflowCard({ workflow, onEdit, onTestRun, onSendCampaign }: Wo
           </div>
         </div>
 
-        {/* Details */}
-        <div className="flex items-center gap-4 text-sm text-muted-foreground">
-          <span>Tone: <span className="font-medium capitalize text-foreground">{workflow.tone}</span></span>
-        </div>
-
         {/* Actions */}
         <div className="flex items-center gap-2 pt-4 border-t flex-wrap">
           {onTestRun && (
