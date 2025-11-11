@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, Sparkles, TrendingUp, Users, Mail, Target } from "lucide-react";
+import { Sparkles, Target } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { toast } from "sonner";
 import { CampaignCardSkeleton, CampaignListSkeleton } from "@/components/CampaignCardSkeleton";
@@ -16,9 +16,6 @@ export default function Dashboard() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [stats, setStats] = useState({
     totalCampaigns: 0,
-    activeCampaigns: 0,
-    totalSent: 0,
-    totalReplied: 0,
   });
   const [loading, setLoading] = useState(true);
 
@@ -49,24 +46,11 @@ export default function Dashboard() {
 
       if (totalError) throw totalError;
 
-      // Get active count
-      const { count: activeCount, error: activeError } = await supabase
-        .from("campaigns")
-        .select("*", { count: 'exact', head: true })
-        .eq("user_id", user.id)
-        .eq("status", "active");
-
-      if (activeError) throw activeError;
-
-      // Calculate sent and replied from recent campaigns (or load separately if needed)
       const campaigns = recentCampaigns || [];
       setCampaigns(campaigns);
 
       setStats({
         totalCampaigns: totalCount || 0,
-        activeCampaigns: activeCount || 0,
-        totalSent: campaigns.reduce((sum, c) => sum + (c.total_sent || 0), 0),
-        totalReplied: campaigns.reduce((sum, c) => sum + (c.total_replied || 0), 0),
       });
     } catch (error) {
       console.error("Error loading dashboard:", error);
@@ -89,10 +73,7 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <CampaignCardSkeleton />
-            <CampaignCardSkeleton />
-            <CampaignCardSkeleton />
+          <div className="grid gap-4 md:grid-cols-1">
             <CampaignCardSkeleton />
           </div>
 
@@ -135,7 +116,7 @@ export default function Dashboard() {
           </Button>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-1">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium">Total Campaigns</CardTitle>
@@ -144,48 +125,7 @@ export default function Dashboard() {
             <CardContent>
               <div className="text-2xl font-bold">{stats.totalCampaigns}</div>
               <p className="text-xs text-muted-foreground mt-1">
-                {stats.activeCampaigns} active
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium">Active Campaigns</CardTitle>
-              <TrendingUp className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stats.activeCampaigns}</div>
-              <p className="text-xs text-muted-foreground mt-1">
-                Currently running
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium">Emails Sent</CardTitle>
-              <Mail className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stats.totalSent}</div>
-              <p className="text-xs text-muted-foreground mt-1">
-                Total outreach
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium">Replies</CardTitle>
-              <Users className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stats.totalReplied}</div>
-              <p className="text-xs text-muted-foreground mt-1">
-                {stats.totalSent > 0
-                  ? `${((stats.totalReplied / stats.totalSent) * 100).toFixed(1)}% rate`
-                  : "No data yet"}
+                All campaigns
               </p>
             </CardContent>
           </Card>
@@ -264,7 +204,7 @@ export default function Dashboard() {
             <CardTitle>Quick Actions</CardTitle>
             <CardDescription>Get started with common tasks</CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-4 md:grid-cols-2">
+          <CardContent className="grid gap-4 md:grid-cols-1">
             <Button
               variant="outline"
               className="h-auto py-6 justify-start"
@@ -278,23 +218,6 @@ export default function Dashboard() {
                   <div className="font-semibold">AI Campaign Builder</div>
                   <div className="text-sm text-muted-foreground">
                     Chat with AI to create campaigns
-                  </div>
-                </div>
-              </div>
-            </Button>
-            <Button
-              variant="outline"
-              className="h-auto py-6 justify-start"
-              onClick={() => navigate("/campaigns/new")}
-            >
-              <div className="flex items-start gap-4">
-                <div className="rounded-lg bg-primary/10 p-3">
-                  <Plus className="h-6 w-6 text-primary" />
-                </div>
-                <div className="text-left">
-                  <div className="font-semibold">Manual Campaign</div>
-                  <div className="text-sm text-muted-foreground">
-                    Create campaign with a form
                   </div>
                 </div>
               </div>

@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Edit, Play, Target, Mail, Search, Clock, FileText, ChevronDown, Send } from "lucide-react";
+import { Edit, Play, Target, Mail, Search, FileText, ChevronDown, Send } from "lucide-react";
 import { useState } from "react";
 
 interface WorkflowStep {
@@ -82,26 +82,6 @@ export function WorkflowCard({ workflow, onEdit, onTestRun, onSendCampaign }: Wo
         )}
       </CardHeader>
       <CardContent className="space-y-6">
-        {/* Schedule Section */}
-        {workflow.schedule && (
-          <div className="space-y-2">
-            <h4 className="font-semibold text-sm text-muted-foreground flex items-center gap-2">
-              <Clock className="h-4 w-4" />
-              Schedule
-            </h4>
-            <div className="flex items-center gap-3 flex-wrap">
-              <Badge variant="secondary" className="capitalize">
-                {workflow.schedule.frequency}
-              </Badge>
-              <span className="text-sm text-muted-foreground">
-                at {workflow.schedule.time}
-              </span>
-              <span className="text-sm text-muted-foreground">
-                • {workflow.schedule.batch_size} prospects per run
-              </span>
-            </div>
-          </div>
-        )}
         {/* Target Audience */}
         <div className="space-y-2">
           <h4 className="font-semibold text-sm text-muted-foreground">Target Audience</h4>
@@ -193,10 +173,7 @@ export function WorkflowCard({ workflow, onEdit, onTestRun, onSendCampaign }: Wo
           </h4>
           <div className="bg-muted/30 rounded-lg p-3">
             <p className="text-sm text-muted-foreground">
-              <span className="font-medium text-foreground">AI will generate emails</span> unless you upload your own template.
-            </p>
-            <p className="text-xs text-muted-foreground mt-1">
-              Click "Edit Template" below to use a custom email template instead.
+              <span className="font-medium text-foreground">AI will generate emails</span> for your prospects.
             </p>
           </div>
         </div>
@@ -208,12 +185,6 @@ export function WorkflowCard({ workflow, onEdit, onTestRun, onSendCampaign }: Wo
 
         {/* Actions */}
         <div className="flex items-center gap-2 pt-4 border-t flex-wrap">
-          {onEdit && (
-            <Button variant="outline" size="sm" onClick={onEdit}>
-              <FileText className="h-4 w-4 mr-2" />
-              Edit Template
-            </Button>
-          )}
           {onTestRun && (
             <Button variant="secondary" size="sm" onClick={onTestRun}>
               <Play className="h-4 w-4 mr-2" />
