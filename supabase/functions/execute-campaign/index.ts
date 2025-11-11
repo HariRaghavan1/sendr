@@ -27,7 +27,7 @@ serve(async (req) => {
       throw new Error('Unauthorized');
     }
 
-    const { campaign_id, execution_type, max_prospects = 10, skip_sending = true, email_template = null } = await req.json();
+    const { campaign_id, execution_type, max_prospects = 10, skip_sending = false, email_template = null } = await req.json();
 
     console.log('Starting campaign execution:', { campaign_id, execution_type, max_prospects, skip_sending });
 

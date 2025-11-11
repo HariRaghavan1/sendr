@@ -276,7 +276,7 @@ serve(async (req) => {
 
     // Set defaults and clamp max_prospects
     const limit = Math.max(1, Math.min(25, max_prospects || 5));
-    const shouldSkipSending = skip_sending !== undefined ? skip_sending : true;
+    const shouldSkipSending = skip_sending !== undefined ? skip_sending : false;
     // ALWAYS enrich emails for test runs - this is critical for finding contact information
     const shouldEnrichEmails = enrich_emails !== undefined ? enrich_emails : true;
 
@@ -830,13 +830,39 @@ serve(async (req) => {
 
           if (!cladoResponse.ok) {
             const errorText = await cladoResponse.text();
-            console.error(`Clado error for ${description}:`, errorText);
-            await updateExecutionLog(supabase, execution_id, `[2/3] ❌ Query "${description}" failed (${duration}s)`);
+            console.error(`Clado error for ${description}:`, {
+              status: cladoResponse.status,
+              statusText: cladoResponse.statusText,
+              error: errorText
+            });
+            await updateExecutionLog(supabase, execution_id, `[2/3] ❌ Query "${description}" failed (${cladoResponse.status}): ${errorText.substring(0, 100)}`);
             return [];
           }
 
           const cladoData = await cladoResponse.json();
-          const results = (cladoData.results || []).map((result: any) => {
+          
+          // DEBUG: Log the actual response structure
+          console.log(`[DEBUG] Clado API response for "${description}":`, {
+            has_results: !!cladoData.results,
+            results_type: typeof cladoData.results,
+            results_length: Array.isArray(cladoData.results) ? cladoData.results.length : 'not an array',
+            response_keys: Object.keys(cladoData),
+            first_result_sample: cladoData.results?.[0] ? {
+              keys: Object.keys(cladoData.results[0]),
+              has_profile: !!cladoData.results[0].profile,
+              has_experience: !!cladoData.results[0].experience,
+            } : null,
+            full_response_sample: JSON.stringify(cladoData).substring(0, 500)
+          });
+          
+          // Handle different possible response structures
+          let resultsArray = cladoData.results || cladoData.data || cladoData.items || [];
+          if (!Array.isArray(resultsArray)) {
+            console.warn(`[WARN] Clado response is not an array, got:`, typeof resultsArray);
+            resultsArray = [];
+          }
+          
+          const results = resultsArray.map((result: any) => {
             const profile = result.profile || {};
             const experience = result.experience?.[0] || {};
 
